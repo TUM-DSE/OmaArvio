@@ -13,7 +13,7 @@ import subprocess
 import psutil
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from queue import Queue
 from shlex import quote
@@ -132,37 +132,10 @@ def _find_ssh_key() -> Path:
 
 
 class GuestSshKey:
-    _instance: Optional["GuestSshKey"] = None
-
-    def __new__(cls) -> "GuestSshKey":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
     def __init__(self) -> None:
-        if self._initialized:
-            return
-
         self._source_path = _find_ssh_key()
         self._tmpdir = TemporaryDirectory(prefix="cvm-ssh-key-")
         self._key_path = Path(self._tmpdir.name) / "ssh_key"
-        self._cleaned_up = False
-        self._copy_key()
-        self._initialized = True
-
-    @classmethod
-    def cleanup_instance(cls) -> None:
-        if cls._instance is not None:
-            cls._instance.cleanup()
-
-    @property
-    def path(self) -> Path:
-        if not self._key_path.exists():
-            self._copy_key()
-        return self._key_path
-
-    def _copy_key(self) -> None:
         key_dir = Path(self._tmpdir.name)
         key_dir.chmod(0o700)
 
@@ -176,24 +149,30 @@ class GuestSshKey:
 
         self._key_path.chmod(0o400)
 
+    @property
+    def path(self) -> Path:
+        return self._key_path
+
     def cleanup(self) -> None:
-        if getattr(self, "_cleaned_up", True):
-            return
         self._tmpdir.cleanup()
-        self._cleaned_up = True
-        self._initialized = False
-        if type(self)._instance is self:
-            type(self)._instance = None
-
-    def __del__(self) -> None:
-        self.cleanup()
 
 
-atexit.register(GuestSshKey.cleanup_instance)
+@cache
+def _guest_ssh_key() -> GuestSshKey:
+    return GuestSshKey()
+
+
+def _cleanup_guest_ssh_key() -> None:
+    if _guest_ssh_key.cache_info().currsize:
+        _guest_ssh_key().cleanup()
+        _guest_ssh_key.cache_clear()
+
+
+atexit.register(_cleanup_guest_ssh_key)
 
 
 def ssh_cmd(port: int) -> List[str]:
-    key_path = GuestSshKey().path
+    key_path = _guest_ssh_key().path
     return [
         "ssh",
         "-i",
