@@ -231,6 +231,9 @@ The root flake assembles all `lib.sharedData` derivations into a single
 `moduleSharedData` package structured as `modules/<module_name>/`. This is
 exposed as `/shared` in both the guest VM (via virtfs at launch time, identical
 to `/share`) and in the HostRunner's systemd scope (via `BindPaths`).
+Relative symlinks inside a module's shared data are preserved when they resolve
+within that module's shared data root. Symlinks that resolve outside that root
+are copied into the assembled package instead.
 
 Python code accesses assets via the stable path `/shared/modules/<name>/`:
 

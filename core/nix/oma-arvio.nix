@@ -39,11 +39,16 @@ let
   moduleInvPythonPkgs = map (m: m.lib.invPythonPackages or (_ps: [ ])) modules;
 
   # Aggregate per-module sharedData derivations into modules/<name>/ structure.
-  moduleSharedData = pkgs.runCommand "module-shared-data" { } ''
+  moduleSharedData = pkgs.runCommand "module-shared-data"
+    {
+      nativeBuildInputs = [ pkgs.rsync ];
+    } ''
     mkdir -p $out/modules
     ${pkgs.lib.concatStrings (map (m:
       pkgs.lib.optionalString (m.lib ? sharedData) ''
-        ln -sf ${m.lib.sharedData} $out/modules/${m.lib.pythonName}
+        module_out="$out/modules/${m.lib.pythonName}"
+        mkdir -p "$module_out"
+        rsync -a --copy-unsafe-links ${m.lib.sharedData}/ "$module_out"/
       ''
     ) modules)}
   '';
