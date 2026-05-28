@@ -576,6 +576,52 @@ def spawn_host_runner(config: Optional[dict] = None) -> Iterator[HostRunner]:
 
 
 @contextmanager
+def spawn_runner(
+    qemu_command: Optional[List[str]] = None,
+    *,
+    config: Optional[dict] = None,
+    pin: bool = False,
+    shutdown: bool = True,
+) -> Iterator[Union[QemuVm, HostRunner]]:
+    """Spawn a host or VM runner and manage common runner lifecycle.
+
+    When requested, vCPU pinning is applied before yielding the runner. By
+    default the runner is gracefully shut down when the context exits.
+    """
+    if config is None:
+        config = {}
+
+    pin_base = None
+    if pin:
+        pin_resource = config.get("resource")
+        if pin_resource is None:
+            raise ValueError("config['resource'] is required when pin=True")
+        pin_base = config.get("pin_base", pin_resource.pin_base)
+
+    if config.get("type") == "host":
+        runner_context = spawn_host_runner(config=config)
+    else:
+        if qemu_command is None:
+            raise ValueError("qemu_command is required for VM runner")
+
+        resource = config["resource"]
+        runner_context = spawn_qemu(
+            qemu_command,
+            numa_node=resource.numa_node,
+            config=config,
+        )
+
+    with runner_context as runner:
+        if pin:
+            runner.pin_vcpu(pin_base)
+        try:
+            yield runner
+        finally:
+            if shutdown:
+                runner.shutdown()
+
+
+@contextmanager
 def spawn_qemu(
     qemu_command: List[str],
     extra_args: Optional[List[str]] = None,

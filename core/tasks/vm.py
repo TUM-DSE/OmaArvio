@@ -11,116 +11,52 @@ from typing import Any, List, Optional
 
 from invoke import task
 
-from core.tasks.actions import ACTIONS
-from core.tasks.actions.runner import run_benchmark_action
+from core.tasks.actions.runner import (
+    configure_vfio_trace,
+    run_benchmark_action,
+)
+from core.tasks.actions.registry import get_action
 from core.tasks.config import SSH_PORT
-from core.tasks.qemu import spawn_host_runner, spawn_qemu
+from core.tasks.qemu import spawn_runner
 from core.tasks.qemu_options import (
     get_amd_qemu_cmd_general,
     qemu_option_nvme,
     qemu_option_virtio_blk,
     qemu_option_virtio_nic,
 )
-from core.tasks.resources import VMResource, get_vm_resource
-from core.tasks.utils.utils import get_benchmark_output_path
+from core.tasks.resources import get_vm_resource
 from core.tasks.utils.vfio import bind_device_to_vfio, unbind_device_from_vfio
 
 
-def start_and_attach(qemu_cmd: List[str], pin: bool, **kwargs: Any) -> None:
-    resource: VMResource = kwargs["config"]["resource"]
-    pin_base = kwargs["config"].get("pin_base", resource.pin_base)
-    with spawn_qemu(
-        qemu_cmd, numa_node=resource.numa_node, config=kwargs["config"]
-    ) as vm:
-        if pin:
-            vm.pin_vcpu(pin_base)
-        vm.attach()
-        vm.shutdown()
-
-
-def ssh_cmd(qemu_cmd: List[str], pin: bool, **kwargs: Any) -> None:
-    resource: VMResource = kwargs["config"]["resource"]
-    pin_base = kwargs["config"].get("pin_base", resource.pin_base)
-    cmds: list[str] = kwargs["config"]["ssh_cmd"]
-    with spawn_qemu(
-        qemu_cmd, numa_node=resource.numa_node, config=kwargs["config"]
-    ) as vm:
-        if pin:
-            vm.pin_vcpu(pin_base)
-        vm.wait_for_ssh()
-        for cmd in cmds:
-            vm.ssh_cmd(shlex.split(cmd))
-        vm.shutdown()
-
-
-def start_and_attach_host(pin: bool, **kwargs: Any) -> None:
-    with spawn_host_runner(config=kwargs["config"]) as runner:
+def start_and_attach(
+    qemu_cmd: Optional[List[str]] = None, pin: bool = True, **kwargs: Any
+) -> None:
+    with spawn_runner(qemu_cmd, config=kwargs["config"], pin=pin) as runner:
         runner.attach()
 
 
-def ssh_cmd_host(pin: bool, **kwargs: Any) -> None:
+def ssh_cmd(
+    qemu_cmd: Optional[List[str]] = None, pin: bool = True, **kwargs: Any
+) -> None:
     cmds: list[str] = kwargs["config"]["ssh_cmd"]
-    with spawn_host_runner(config=kwargs["config"]) as runner:
+    with spawn_runner(qemu_cmd, config=kwargs["config"], pin=pin) as runner:
         runner.wait_for_ssh()
         for cmd in cmds:
             runner.ssh_cmd(shlex.split(cmd))
-        runner.shutdown()
 
 
 def do_action(action: str, **kwargs: Any) -> None:
-    config = kwargs.get("config", {})
-    is_host = config.get("type") == "host"
-
     if action == "attach":
-        handler = start_and_attach_host if is_host else start_and_attach
-        handler(**kwargs)
+        start_and_attach(**kwargs)
         return
 
     if action == "ssh-cmd":
-        handler = ssh_cmd_host if is_host else ssh_cmd
-        handler(**kwargs)
+        ssh_cmd(**kwargs)
         return
 
-    if action.startswith("run-"):
-        action_type = action.replace("run-", "")
-        if action_type not in ACTIONS:
-            raise ValueError(
-                f"Unknown action: {action}. "
-                f"Available run-* actions: {['run-' + k for k in ACTIONS.keys()]}"
-            )
-        run_benchmark_action(action_type=action_type, **kwargs)
-        return
-
-    raise ValueError(f"Unknown action: {action}")
-
-
-def _prepare_vfio_trace_path(config: dict, vm_name: str, action: str) -> None:
-    if not config.get("vfio_trace") or config.get("vfio_trace_file") is not None:
-        return
-
-    timestamp = config.get("action_timestamp")
-    if timestamp is None:
-        from datetime import datetime
-
-        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        config["action_timestamp"] = timestamp
-
-    if action.startswith("run-"):
-        action_type = action.replace("run-", "")
-        if action_type not in ACTIONS:
-            return
-        action_config = config.get("action_config") or {}
-        outputdir_host, _, _ = get_benchmark_output_path(
-            *ACTIONS[action_type].path_fn(vm_name, action_config),
-            timestamp=timestamp,
-            create_dirs=True,
-        )
-        trace_file = outputdir_host / f"{timestamp}_vfio_trace.log"
-    else:
-        trace_file = Path(f"./vfio_trace_{vm_name}_{timestamp}.log")
-
-    config["vfio_trace_file"] = str(trace_file)
-    print(f"VFIO tracing enabled -> {trace_file}")
+    # Check if action exists and then run it
+    get_action(action)
+    run_benchmark_action(action_type=action, **kwargs)
 
 
 @task
@@ -202,14 +138,13 @@ def start(
 
     if type == "host":
         name = f"host-{size}" + name_extra
-        _prepare_vfio_trace_path(config, name, action)
         print(f"Starting host runner: {name}")
         do_action(action, pin=pin, name=name, config=config)
         return
 
     qemu_name = f"{type}-direct" if direct else type
     name = f"{type}-{'direct' if direct else 'disk'}-{size}" + name_extra
-    _prepare_vfio_trace_path(config, name, action)
+    configure_vfio_trace(config, name, action)
 
     qemu_cmd = get_amd_qemu_cmd_general(
         resource,

@@ -6,17 +6,7 @@ from __future__ import annotations
 import time
 
 from core.tasks.qemu import HostRunner, QemuVm
-
-
-def parse_size_to_mb(size_str: str) -> int:
-    size_str = size_str.upper().strip()
-    if size_str.endswith("G"):
-        return int(size_str[:-1]) * 1024
-    if size_str.endswith("M"):
-        return int(size_str[:-1])
-    if size_str.endswith("T"):
-        return int(size_str[:-1]) * 1024 * 1024
-    return int(size_str)
+from core.tasks.utils.utils import parse_size_to_mb
 
 
 def parse_job_filesystem(job_name: str) -> str:

@@ -7,63 +7,84 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from core.tasks.actions.registry import ACTIONS, ActionContext
-from core.tasks.qemu import HostRunner, spawn_host_runner, spawn_qemu
+from core.tasks.actions.registry import Action, ActionContext, get_action
+from core.tasks.qemu import spawn_runner
 from core.tasks.utils.monitoring import monitor_with_perf_kvm, monitor_with_sar
 from core.tasks.utils.utils import get_benchmark_output_path
 
+ACTION_TIMESTAMP_FORMAT = "%Y-%m-%d-%H-%M-%S"
 
-def _configure_vfio_trace(config: dict, outputdir_host: Path, timestamp: str) -> None:
+
+def ensure_action_timestamp(config: dict) -> str:
+    timestamp = config.get("action_timestamp")
+    if timestamp is None:
+        timestamp = datetime.now().strftime(ACTION_TIMESTAMP_FORMAT)
+        config["action_timestamp"] = timestamp
+    return timestamp
+
+
+def prepare_action_output(
+    action_type: str,
+    name: str,
+    config: dict,
+    *,
+    create_dirs: bool = True,
+) -> tuple[Action, Path, Path, str]:
+    action = get_action(action_type)
+    action_config = config.get("action_config") or {}
+    timestamp = ensure_action_timestamp(config)
+    outputdir_host, outputdir_guest, _ = get_benchmark_output_path(
+        *action.path_fn(name, action_config),
+        timestamp=timestamp,
+        create_dirs=create_dirs,
+    )
+    return action, outputdir_host, outputdir_guest, timestamp
+
+
+def configure_vfio_trace(
+    config: dict,
+    vm_name: str,
+    action_name: str,
+) -> None:
     if not config.get("vfio_trace", False):
         return
-    if config.get("vfio_trace_file") is None:
+    if config.get("vfio_trace_file") is not None:
+        print(f"VFIO tracing enabled -> {config['vfio_trace_file']}")
+        return
+
+    timestamp = ensure_action_timestamp(config)
+    try:
+        _, outputdir_host, _, timestamp = prepare_action_output(
+            action_name,
+            vm_name,
+            config,
+            create_dirs=True,
+        )
         trace_filename = config.get(
             "vfio_trace_filename", f"{timestamp}_vfio_trace.log"
         )
-        vfio_trace_file = outputdir_host / trace_filename
-        config["vfio_trace_file"] = str(vfio_trace_file)
-        print(f"VFIO tracing enabled -> {vfio_trace_file}")
-    else:
-        print(f"VFIO tracing enabled -> {config['vfio_trace_file']}")
+        trace_file = outputdir_host / trace_filename
+    except ValueError:
+        trace_file = Path(f"./vfio_trace_{vm_name}_{timestamp}.log")
+
+    config["vfio_trace_file"] = str(trace_file)
+    print(f"VFIO tracing enabled -> {trace_file}")
 
 
 def run_benchmark_action(action_type: str, **kwargs: Any) -> None:
     config = kwargs["config"]
     action_config = config.get("action_config") or {}
-    is_host = config.get("type") == "host"
     name = kwargs["name"]
-    resource = config["resource"]
-    pin_base = config.get("pin_base", resource.pin_base)
     qemu_cmd = kwargs.get("qemu_cmd")
     pin = kwargs.get("pin", True)
-    timestamp = config.get("action_timestamp") or datetime.now().strftime(
-        "%Y-%m-%d-%H-%M-%S"
+
+    action, outputdir_host, outputdir_guest, timestamp = prepare_action_output(
+        action_type,
+        name,
+        config,
     )
 
-    if action_type not in ACTIONS:
-        raise ValueError(
-            f"Unknown benchmark action type: {action_type}. "
-            f"Available: {list(ACTIONS.keys())}"
-        )
-
-    action = ACTIONS[action_type]
-    outputdir_host, outputdir_guest, _ = get_benchmark_output_path(
-        *action.path_fn(name, action_config),
-        timestamp=timestamp,
-        create_dirs=True,
-    )
-    _configure_vfio_trace(config, outputdir_host, timestamp)
-
-    spawn_runner = (
-        spawn_host_runner(config=config)
-        if is_host
-        else spawn_qemu(qemu_cmd, numa_node=resource.numa_node, config=config)
-    )
-
-    with spawn_runner as runner:
-        if pin:
-            runner.pin_vcpu(pin_base)
-
+    with spawn_runner(qemu_cmd, config=config, pin=pin) as runner:
         runner.wait_for_ssh()
 
         action_ctx = ActionContext(
@@ -72,7 +93,7 @@ def run_benchmark_action(action_type: str, **kwargs: Any) -> None:
             timestamp=timestamp,
             outputdir_host=outputdir_host,
             outputdir_guest=outputdir_guest,
-            is_host=is_host,
+            is_host=config.get("type") == "host",
             config=config,
             action_config=action_config,
         )
@@ -85,5 +106,3 @@ def run_benchmark_action(action_type: str, **kwargs: Any) -> None:
                     outputdir_host, timestamp, config, vm=runner
                 ):
                     action.fn(ctx=action_ctx, **action_config)
-
-        runner.shutdown()

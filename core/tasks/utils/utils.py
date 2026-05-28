@@ -3,10 +3,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from humanfriendly import parse_size
 from invoke import task
 
 import core.tasks.config as config
 from core.tasks.config import PROJECT_ROOT
+
+
+def parse_size_to_bytes(size: str | int | float) -> int:
+    """Parse sizes like 512K, 10G, or 2.5G using binary units."""
+    return int(parse_size(str(size), binary=True))
+
+
+def parse_size_to_mb(size: str | int | float) -> int:
+    """Parse a size and return whole MiB."""
+    return parse_size_to_bytes(size) // (1024 * 1024)
 
 
 def get_benchmark_output_path(

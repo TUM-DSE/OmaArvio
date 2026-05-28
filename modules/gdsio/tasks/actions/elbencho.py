@@ -4,11 +4,11 @@ from typing import Optional
 
 from core.tasks.actions import ActionContext
 from core.tasks.qemu import QemuVm, HostRunner
+from core.tasks.utils.utils import parse_size_to_mb
 from core.tasks.actions.registry import register_action
 from modules.nvme.tasks.utils.storage import (
     format_plain_device,
     cleanup_encrypted_device,
-    parse_size_to_mb,
 )
 
 ELBENCHO_IMAGE = "breuner/elbencho:master-ubuntu-cuda-multiarch"

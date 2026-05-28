@@ -15,6 +15,7 @@ from typing import List, Optional, Tuple
 
 from core.tasks.config import BUILD_DIR, LINUX_DIR, PROJECT_ROOT
 from core.tasks.resources import VMResource
+from core.tasks.utils.utils import parse_size_to_bytes
 from core.tasks.utils.vfio import get_pci_ids
 
 
@@ -237,17 +238,6 @@ def qemu_option_virtio_blk(
         """
 
     return shlex.split(option)
-
-
-def parse_size_to_bytes(size: str) -> int:
-    s = size.upper().strip()
-    if s.endswith("G"):
-        return int(float(s[:-1]) * 1024 * 1024 * 1024)
-    if s.endswith("M"):
-        return int(float(s[:-1]) * 1024 * 1024)
-    if s.endswith("K"):
-        return int(float(s[:-1]) * 1024)
-    return int(s)
 
 
 def qemu_option_nvme(

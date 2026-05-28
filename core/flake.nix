@@ -130,6 +130,7 @@
           pyproject = true;
           inherit src;
           build-system = [ pkgs.python3.pkgs.setuptools ];
+          dependencies = [ pkgs.python3.pkgs.humanfriendly ];
         };
 
       devShells.${system}.kernel-build = pkgs.mkShell {

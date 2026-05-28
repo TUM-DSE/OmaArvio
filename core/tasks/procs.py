@@ -52,50 +52,6 @@ def run(
     )
 
 
-def systemd_run(
-    cmd: List[str],
-    extra_env: Optional[Dict[str, str]] = None,
-    stdout: ChildFd = subprocess.PIPE,
-    stderr: ChildFd = None,
-    input: Optional[str] = None,
-    stdin: ChildFd = None,
-    check: bool = True,
-    verbose: bool = True,
-    cwd: Optional[Path] = None,
-    cpus: int = 4,
-    memory_gigabytes: int = 8,
-    env: Optional[Dict[str, str]] = None,
-) -> List[str]:
-    """Run a command with systemd-run with memory and CPU restrictions."""
-    if extra_env is None:
-        extra_env = {}
-    if env is None:
-        env = {}
-    assert memory_gigabytes >= 1
-    # if 0 this is an empty string, which means no restrictions
-    mask = ",".join(map(str, range(cpus)))
-    high_mem = (memory_gigabytes - 0.5) * 1000
-    systemd_cmd = [
-        "systemd-run",
-        "--pty",
-        "--wait",
-        "--collect",
-        "-p",
-        f"MemoryHigh={high_mem}M",
-        "-p",
-        f"MemoryMax={memory_gigabytes}G",
-        "-p",
-        f"AllowedCPUs={mask}",
-    ]
-    for k, v in env.items():
-        systemd_cmd.append(f"--setenv={k}={v}")
-    systemd_cmd.append("--")
-    systemd_cmd.extend(cmd)
-    return run(
-        systemd_cmd, extra_env, stdout, stderr, input, stdin, check, verbose, cwd
-    )
-
-
 def get_nix_env() -> Dict[str, str]:
     """Get environment variables from Nix benchmarking dev shell.
 
