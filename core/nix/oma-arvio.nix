@@ -22,6 +22,7 @@ let
     seaborn
     requests
     ijson
+    qemu
   ] ++ builtins.concatLists (map (f: f ps) moduleInvPythonPkgs));
 
   # ── Modules: each exports lib.pythonSrc — a derivation with tasks/ laid out

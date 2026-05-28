@@ -5,7 +5,6 @@
 # https://github.com/Mic92/vmsh/blob/358cd4b6ec7de0dcac05a12e32486ef30658018c/tests/qemu.py
 
 import atexit
-import json
 import os
 import re
 import socket
@@ -15,7 +14,6 @@ import time
 from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
-from queue import Queue
 from shlex import quote
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, Iterator, List, Text, Optional, Union
@@ -24,57 +22,25 @@ from core.tasks.procs import ChildFd, pprint_cmd, run, system_run, get_nix_env
 from core.tasks.config import PROJECT_ROOT
 
 
+from qemu.qmp.legacy import QEMUMonitorProtocol
+
+
 class QmpSession:
-    def __init__(self, sock: socket.socket) -> None:
-        self.sock = sock
-        self.pending_events: Queue[Dict[str, Any]] = Queue()
-        self.reader = sock.makefile("r")
-        self.writer = sock.makefile("w")
-        hello = self._result()
-        assert "QMP" in hello, f"Unexpected result: {hello}"
-        self.send("qmp_capabilities")
-
-    def _readmsg(self) -> Dict[str, Any]:
-        line = self.reader.readline()
-        return json.loads(line)
-
-    def _raise_unexpected_msg(self, msg: Dict[str, Any]) -> None:
-        m = json.dumps(msg, sort_keys=True, indent=4)
-        raise RuntimeError(f"Got unexpected qmp response: {m}")
-
-    def _result(self) -> Dict[str, Any]:
-        while True:
-            # QMP is in the handshake
-            res = self._readmsg()
-            if "return" in res or "QMP" in res:
-                return res
-            elif "event" in res:
-                self.pending_events.put(res)
-                continue
-            else:
-                self._raise_unexpected_msg(res)
+    def __init__(self, path: Path) -> None:
+        self.qmp = QEMUMonitorProtocol(str(path))
+        self.qmp.connect(negotiate=True)
 
     def events(self) -> Iterator[Dict[str, Any]]:
-        while not self.pending_events.empty():
-            yield self.pending_events.get()
+        events = self.qmp.get_events(wait=False)
+        for event in events:
+            yield dict(event)
+        if not events:
+            event = self.qmp.pull_event(wait=True)
+            if event is not None:
+                yield dict(event)
 
-        res = self._readmsg()
-
-        if "event" not in res:
-            self._raise_unexpected_msg(res)
-        yield res
-
-    def send(self, cmd: str, args: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-        if args is None:
-            args = {}
-        data: Dict[str, Any] = dict(execute=cmd)
-        if args != {}:
-            data["arguments"] = args
-
-        json.dump(data, self.writer)
-        self.writer.write("\n")
-        self.writer.flush()
-        return self._result()
+    def send(self, cmd: str, args: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return dict(self.qmp.cmd_raw(cmd, args))
 
 
 def is_port_open(ip: str, port: int, wait_response: bool = False) -> bool:
@@ -91,13 +57,11 @@ def is_port_open(ip: str, port: int, wait_response: bool = False) -> bool:
 
 @contextmanager
 def connect_qmp(path: Path) -> Iterator[QmpSession]:
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(str(path))
-
+    session = QmpSession(path)
     try:
-        yield QmpSession(sock)
+        yield session
     finally:
-        sock.close()
+        session.qmp.close()
 
 
 def parse_regs(qemu_output: str) -> Dict[str, int]:
