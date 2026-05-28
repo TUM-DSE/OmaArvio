@@ -1,0 +1,19 @@
+[global]
+# These test are focused on the ban
+# Engine-specific params (ioengine, direct, thread, cmd_type) are
+# passed via CLI by the benchmark runner (tasks/actions/storage.py).
+
+norandommap=1 # generate random offset for IO (independent of previous offsets)
+randrepeat=0 # RNG for generating offset is seeded in random manner
+
+ramp_time=20
+group_reporting=1
+
+size=100%
+
+[bw read]
+stonewall
+blocksize=128k
+rw=read
+iodepth=128
+numjobs=4

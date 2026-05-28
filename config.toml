@@ -1,0 +1,67 @@
+# Host-specific device PCI addresses and VM resource overrides.
+
+[defaults]
+# output_root = "/path/to/build-output"
+#   Optional: override where build artifacts (build/) are written.
+#   Defaults to the directory containing this config.toml (the repo root).
+ssh_port = 2225
+vm_ip = "172.44.0.2"
+valid_pcie_speeds = [4, 5]
+
+[defaults.vm_resources]
+small  = { cpu = 1,  memory = 8,   numa_node = [0], pin_base = 8 }
+medium = { cpu = 8,  memory = 64,  numa_node = [0], pin_base = 8 }
+large  = { cpu = 32, memory = 256, numa_node = [0], pin_base = 0 }
+numa   = { cpu = 64, memory = 512, numa_node = [0, 1], pin_base = 0 }
+
+[qemu_devices]
+nvme_pci = "0000:00:06.0"
+nvme_dev_path = "/dev/disk/by-id/nvme-QEMU_NVMe_Ctrl_deadbeef_1"
+
+[vm_device_addresses]
+snp = "0000:01:00.0"
+amd = "0000:01:00.0"
+
+[hosts.vislor]
+nvme_pci = "0000:43:00.0"
+dev_path = "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_8F30A0240LM3_1"
+valid_pcie_speeds = [4, 5]
+gpu_pci = "0000:01:00.0"
+
+[hosts.vislor.vm_resources]
+small  = { cpu = 1,  memory = 8,   numa_node = [0], pin_base = 8 }
+medium = { cpu = 8,  memory = 64,  numa_node = [0], pin_base = 8 }
+large  = { cpu = 32, memory = 256, numa_node = [0], pin_base = 0 }
+numa   = { cpu = 64, memory = 512, numa_node = [0, 1], pin_base = 0 }
+
+[hosts.jamie]
+nvme_pci = "0000:e1:00.0"
+dev_path = "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_8F30A0240LM3_1"
+valid_pcie_speeds = [5]
+gpu_pci = "0000:21:00.0"
+
+[hosts.jamie.vm_resources]
+# Default NUMA on jamie is 1 — KIOXIA NVMe is on node 1
+small  = { cpu = 1,  memory = 8,   numa_node = [1], pin_base = 8 }
+medium = { cpu = 8,  memory = 64,  numa_node = [1], pin_base = 8 }
+large  = { cpu = 32, memory = 256, numa_node = [1], pin_base = 0 }
+numa   = { cpu = 64, memory = 512, numa_node = [0, 1], pin_base = 0 }
+
+[hosts.irene]
+nvme_pci = "0000:c3:00.0"
+dev_path = "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_8F30A0220LM3_1"
+valid_pcie_speeds = [4, 5]
+# gpu_pci omitted — no GPU on irene
+
+[hosts.irene.vm_resources]
+small  = { cpu = 1,  memory = 8,   numa_node = [0], pin_base = 8 }
+small2 = { cpu = 2,  memory = 8,   numa_node = [0], pin_base = 8 }
+medium = { cpu = 8,  memory = 64,  numa_node = [0], pin_base = 8 }
+large  = { cpu = 32, memory = 256, numa_node = [0], pin_base = 0 }
+numa   = { cpu = 64, memory = 512, numa_node = [0, 1], pin_base = 0 }
+
+[hosts.polly]
+nvme_pci = "0000:91:00.0"
+dev_path = "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_4FB0A0CT0LM3_1"
+valid_pcie_speeds = [4, 5]
+gpu_pci = "0000:01:00.0"

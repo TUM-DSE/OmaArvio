@@ -1,0 +1,46 @@
+[global]
+# Engine-specific params (ioengine, direct, thread, cmd_type) are
+# passed via CLI by the benchmark runner (tasks/actions/storage.py).
+
+norandommap=1 # generate random offset for IO (independent of previous offsets)
+randrepeat=0 # RNG for generating offset is seeded in random manner
+
+time_based=1
+runtime=30
+ramp_time=20
+
+group_reporting=1
+
+
+# Latency tests (read-only)
+[alat randread]
+stonewall
+blocksize=4k
+rw=randread
+iodepth=1
+numjobs=1
+
+[alat read]
+stonewall
+blocksize=4k
+rw=read
+iodepth=1
+numjobs=1
+
+
+# Bandwidth tests (read-only)
+[bw read]
+stonewall
+blocksize=128k
+rw=read
+iodepth=128
+numjobs=4
+
+
+# IOPS tests (read-only)
+[iops randread]
+stonewall
+blocksize=4k
+rw=randread
+iodepth=32
+numjobs=4

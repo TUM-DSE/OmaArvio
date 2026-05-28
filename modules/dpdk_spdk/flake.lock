@@ -1,0 +1,121 @@
+{
+  "nodes": {
+    "core": {
+      "inputs": {
+        "disko": "disko",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "nixpkgs-2505": "nixpkgs-2505"
+      },
+      "locked": {
+        "path": "../../core",
+        "type": "path"
+      },
+      "original": {
+        "path": "../../core",
+        "type": "path"
+      },
+      "parent": []
+    },
+    "disko": {
+      "inputs": {
+        "nixpkgs": [
+          "core",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1779699611,
+        "narHash": "sha256-EcCaSTKnmg2o4wLKaN1aqQFomwyhO7ik0bX9COdyCas=",
+        "owner": "nix-community",
+        "repo": "disko",
+        "rev": "5ba0c9555c28685e57fa54c7a25e42c7efdbfc8d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "disko",
+        "type": "github"
+      }
+    },
+    "dpdk-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1774978958,
+        "narHash": "sha256-i1+wRbypbSldicGXSe4YXI3NbDA9K0rYdy+R8XX2aXs=",
+        "owner": "DPDK",
+        "repo": "dpdk",
+        "rev": "0e093f95276d0a152abcdd373dd580bd4e07e7f5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "DPDK",
+        "ref": "v26.03",
+        "repo": "dpdk",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1779560665,
+        "narHash": "sha256-tpyBcxPpcQb8ukyNF7DoCwfSY3VPsxHoYwj00Cayv5o=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "64c08a7ca051951c8eae34e3e3cb1e202fe36786",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs-2505": {
+      "locked": {
+        "lastModified": 1767313136,
+        "narHash": "sha256-16KkgfdYqjaeRGBaYsNrhPRRENs0qzkQVUooNHtoy2w=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-25.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "core": "core",
+        "dpdk-src": "dpdk-src",
+        "nixpkgs": "nixpkgs",
+        "spdk-src": "spdk-src"
+      }
+    },
+    "spdk-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1769778772,
+        "narHash": "sha256-E52VozjnoGnIC7viXrsualaaKXiUU9Fx8zGylTjBzX0=",
+        "ref": "refs/tags/v26.01",
+        "rev": "2ef883ef96e79c3cc16da02f667a7a58c2453f2f",
+        "revCount": 23915,
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/spdk/spdk"
+      },
+      "original": {
+        "ref": "refs/tags/v26.01",
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/spdk/spdk"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

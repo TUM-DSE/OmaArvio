@@ -1,0 +1,16 @@
+[global]
+name=lat-write
+xfer_type=$GDSIO_XFER_TYPE
+rw=write
+bs=4K
+size=$GDSIO_FILE_SIZE
+runtime=30
+skip_bufregister=0
+fill_random=1
+refill_buffer=1
+
+[job1]
+numa_node=0
+gpu_dev_id=0
+num_threads=1
+filename=/data/testfile

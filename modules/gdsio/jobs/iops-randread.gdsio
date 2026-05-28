@@ -1,0 +1,16 @@
+[global]
+name=iops-randread
+xfer_type=$GDSIO_XFER_TYPE
+rw=randread
+bs=4K
+size=$GDSIO_FILE_SIZE
+runtime=30
+skip_bufregister=0
+fill_random=0
+random_seed=1234
+
+[job1]
+numa_node=0
+gpu_dev_id=0
+num_threads=4
+filename=/data/testfile

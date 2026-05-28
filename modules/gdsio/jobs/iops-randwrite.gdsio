@@ -1,0 +1,17 @@
+[global]
+name=iops-randwrite
+xfer_type=$GDSIO_XFER_TYPE
+rw=randwrite
+bs=4K
+size=$GDSIO_FILE_SIZE
+runtime=30
+skip_bufregister=0
+fill_random=1
+refill_buffer=1
+random_seed=1234
+
+[job1]
+numa_node=0
+gpu_dev_id=0
+num_threads=4
+filename=/data/testfile

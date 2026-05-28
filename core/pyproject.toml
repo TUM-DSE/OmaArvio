@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cvm-core"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+# "core" maps to "." (the source root), so tasks/ becomes core.tasks, etc.
+[tool.setuptools.package-dir]
+"core" = "."
+
+[tool.setuptools]
+packages = [
+    "core",
+    "core.tasks",
+    "core.tasks.actions",
+    "core.tasks.utils",
+    "core.tasks.plotting",
+]
+
+[tool.setuptools.package-data]
+"core" = ["nix/ssh_key", "nix/ssh_key.pub"]
