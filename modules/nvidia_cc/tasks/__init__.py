@@ -3,7 +3,7 @@
 
 def register(ns):
     """Register nvidia_cc module into the given Collection."""
-    from invoke import Collection
+    from core.tasks.actions.module import register_module
     from modules.nvidia_cc.tasks import gpu
 
-    ns.add_collection(Collection.from_module(gpu))
+    register_module(ns, commands=gpu)

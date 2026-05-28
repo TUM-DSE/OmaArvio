@@ -49,55 +49,6 @@ SSH_PORT: int = 2225
 VM_IP = "172.44.0.2"
 
 
-# Default allowed PCIe speeds (numeric: 4=16GT/s, 5=32GT/s)
-DEFAULT_VALID_PCIE_SPEEDS = [4, 5]
-
-# NVMe device configuration for the different hosts
-# Add valid_speeds per host if needed, else fallback to DEFAULT_VALID_PCIE_SPEEDS
-DEVICE_CONFIG = {
-    "vislor": {
-        "nvme_pci": "0000:43:00.0",
-        "dev_path": "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_8F30A0240LM3_1",
-        "valid_speeds": [4, 5],  # can override per host
-        "gpu_pci": "0000:01:00.0",  # NVIDIA GPU
-    },
-    "jamie": {
-        "nvme_pci": "0000:e1:00.0",
-        "dev_path": "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_8F30A0240LM3_1",
-        "valid_speeds": [5],  # This is in a Gen5 slot, so only allow 32GT/s
-        "gpu_pci": "0000:21:00.0",  # NVIDIA GPU
-    },
-    "irene": {
-        "nvme_pci": "0000:c3:00.0",
-        "dev_path": "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_8F30A0220LM3_1",
-        "valid_speeds": [4, 5],
-        "gpu_pci": None,  # Not configured yet
-    },
-    "polly": {
-        "nvme_pci": "0000:91:00.0",
-        "dev_path": "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_4FB0A0CT0LM3_1",
-        "valid_speeds": [4, 5],
-        "gpu_pci": "0000:01:00.0",  # RTX PRO 6000 Blackwell GPU
-    },
-}
-
-# VM virtual device addresses (same across all hosts)
-VM_DEVICE_ADDRESSES = {
-    "snp": "0000:01:00.0",
-    "amd": "0000:01:00.0",
-}
-
-# QEMU emulated NVMe device (available when --nvme is passed to vm.start)
-QEMU_NVME_PCI = "0000:00:06.0"
-QEMU_NVME_DEV_PATH = "/dev/disk/by-id/nvme-QEMU_NVMe_Ctrl_deadbeef_1"
-
-
-# ---------------------------------------------------------------------------
-# TOML-based config (new API — load_config() / HostConfig)
-# The legacy DEVICE_CONFIG dict above is kept for backward compatibility.
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class VMResourceConfig:
     cpu: int
@@ -122,6 +73,9 @@ class ProjectConfig:
     ssh_port: int
     vm_ip: str
     valid_pcie_speeds: List[int]
+    qemu_nvme_pci: str
+    qemu_nvme_dev_path: str
+    vm_device_addresses: Dict[str, str]
     output_root: Optional[Path] = None  # overrides default PROJECT_ROOT/build location
 
 
@@ -166,6 +120,8 @@ def load_config(config_path: Optional[str] = None) -> ProjectConfig:
             vm_resources=merged_vm_res,
         )
 
+    qemu_devices = raw.get("qemu_devices", {})
+    vm_device_addresses = raw.get("vm_device_addresses", {})
     output_root_raw = defaults.get("output_root")
     output_root = (
         Path(output_root_raw).expanduser().resolve() if output_root_raw else None
@@ -176,7 +132,10 @@ def load_config(config_path: Optional[str] = None) -> ProjectConfig:
         default_vm_resources=default_vm_res,
         ssh_port=defaults.get("ssh_port", SSH_PORT),
         vm_ip=defaults.get("vm_ip", VM_IP),
-        valid_pcie_speeds=defaults.get("valid_pcie_speeds", DEFAULT_VALID_PCIE_SPEEDS),
+        valid_pcie_speeds=defaults.get("valid_pcie_speeds", [4, 5]),
+        qemu_nvme_pci=qemu_devices["nvme_pci"],
+        qemu_nvme_dev_path=qemu_devices["nvme_dev_path"],
+        vm_device_addresses=vm_device_addresses,
         output_root=output_root,
     )
 

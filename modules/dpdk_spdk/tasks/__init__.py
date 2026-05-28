@@ -3,9 +3,7 @@
 
 def register(ns):
     """Register dpdk_spdk module into the given Collection."""
-    from invoke import Collection
-
-    import modules.dpdk_spdk.tasks.actions  # noqa: F401 — loads dpdk_spdk utilities
+    from core.tasks.actions.module import register_module
     from modules.dpdk_spdk.tasks import stress
 
-    ns.add_collection(Collection.from_module(stress))
+    register_module(ns, actions="modules.dpdk_spdk.tasks.actions", commands=stress)

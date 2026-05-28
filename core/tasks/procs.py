@@ -13,7 +13,9 @@ from core.tasks.config import PROJECT_ROOT
 ChildFd = Union[None, int, IO]
 
 
-def pprint_cmd(cmd: List[str], extra_env: Dict[str, str] = {}) -> None:
+def pprint_cmd(cmd: List[str], extra_env: Optional[Dict[str, str]] = None) -> None:
+    if extra_env is None:
+        extra_env = {}
     env_string = []
     for k, v in extra_env.items():
         env_string.append(f"{k}={v}")
@@ -22,7 +24,7 @@ def pprint_cmd(cmd: List[str], extra_env: Dict[str, str] = {}) -> None:
 
 def run(
     cmd: List[str],
-    extra_env: Dict[str, str] = {},
+    extra_env: Optional[Dict[str, str]] = None,
     stdout: ChildFd = subprocess.PIPE,
     stderr: ChildFd = None,
     input: Optional[str] = None,
@@ -31,6 +33,8 @@ def run(
     verbose: bool = True,
     cwd: Optional[Path] = None,
 ) -> "subprocess.CompletedProcess[Text]":
+    if extra_env is None:
+        extra_env = {}
     env = os.environ.copy()
     env.update(extra_env)
     if verbose:
@@ -50,7 +54,7 @@ def run(
 
 def systemd_run(
     cmd: List[str],
-    extra_env: Dict[str, str] = {},
+    extra_env: Optional[Dict[str, str]] = None,
     stdout: ChildFd = subprocess.PIPE,
     stderr: ChildFd = None,
     input: Optional[str] = None,
@@ -60,9 +64,13 @@ def systemd_run(
     cwd: Optional[Path] = None,
     cpus: int = 4,
     memory_gigabytes: int = 8,
-    env: Dict[str, str] = {},
+    env: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """Run a command with systemd-run with memory and CPU restrictions."""
+    if extra_env is None:
+        extra_env = {}
+    if env is None:
+        env = {}
     assert memory_gigabytes >= 1
     # if 0 this is an empty string, which means no restrictions
     mask = ",".join(map(str, range(cpus)))
@@ -148,7 +156,7 @@ def get_nix_env() -> Dict[str, str]:
 def system_run(
     cmd: List[str],
     nix_env: Dict[str, str],
-    extra_env: Dict[str, str] = {},
+    extra_env: Optional[Dict[str, str]] = None,
     stdout: ChildFd = subprocess.PIPE,
     stderr: ChildFd = None,
     input: Optional[str] = None,
@@ -183,6 +191,9 @@ def system_run(
     Returns:
         CompletedProcess with stdout/stderr from the command
     """
+    if extra_env is None:
+        extra_env = {}
+
     # Get the flake root - assumes this script is in tasks/ subdirectory
     from core.tasks.config import PROJECT_ROOT
 

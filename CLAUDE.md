@@ -71,12 +71,14 @@ config.toml        ← host-specific device PCI addresses and VM resource sizes
 
 ### `core/` — Generic Infrastructure
 
-- **`core/tasks/vm.py`** — `inv vm.start`: QEMU command assembly, VFIO bind/unbind, SAR monitoring, action dispatch. The central orchestration file.
+- **`core/tasks/vm.py`** — `inv vm.start`: CLI parsing and host/VM action routing.
+- **`core/tasks/qemu_options.py`** — QEMU command and device option assembly.
+- **`core/tasks/actions/runner.py`** — unified benchmark action execution, output path creation, and monitoring context setup.
 - **`core/tasks/build.py`** — `inv build.*`: builds OVMF, QEMU, guest images, Linux kernel via `nix build`.
 - **`core/tasks/config.py`** — `load_config()` reads `config.toml` (LRU-cached). Defines `PROJECT_ROOT`, `BUILD_DIR` (`build/`), `LINUX_DIR` (`../linux`).
 - **`core/tasks/actions/registry.py`** — `ACTIONS` dict and `@register_action` decorator. Modules register their benchmark implementations here; `vm.py` dispatches `run-<name>` actions through this registry.
 - **`core/tasks/qemu.py`** — `spawn_qemu` / `spawn_host_runner` context managers; `QemuVm` / `HostRunner` classes with `.ssh_cmd()`, `.pin_vcpu()`, `.wait_for_ssh()`.
-- **`core/tasks/utils/utils.py`** — `get_benchmark_output_path()`: canonical output path builder (`bench-result/<components>/`). Both `vm.py` and action functions must use the same timestamp when calling this to co-locate VFIO traces and benchmark outputs.
+- **`core/tasks/utils/utils.py`** — `get_benchmark_output_path()`: canonical output path builder (`bench-result/<components>/`). The action runner owns this call and passes paths to actions through `ActionContext`.
 - **`core/tasks/plotting/common.py`** — shared Matplotlib style for paper-quality plots (sizes, colors, hatches, fonts).
 
 ### Modules — Benchmark Implementations

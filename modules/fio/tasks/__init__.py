@@ -3,9 +3,7 @@
 
 def register(ns):
     """Register fio module into the given Collection."""
-    from invoke import Collection
-
-    import modules.fio.tasks.actions  # noqa: F401 — registers "fio" action
+    from core.tasks.actions.module import register_module
     from modules.fio.tasks import fio
 
-    ns.add_collection(Collection.from_module(fio))
+    register_module(ns, actions="modules.fio.tasks.actions", commands=fio)

@@ -3,4 +3,6 @@
 
 def register(ns):
     """Register nvbandwidth module into the given Collection (side-effect imports only)."""
-    import modules.nvbandwidth.tasks.actions  # noqa: F401 — registers nvbandwidth action
+    from core.tasks.actions.module import register_module
+
+    register_module(ns, actions="modules.nvbandwidth.tasks.actions")

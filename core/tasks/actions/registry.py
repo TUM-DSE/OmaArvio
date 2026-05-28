@@ -1,5 +1,20 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, Tuple
+
+
+@dataclass(frozen=True)
+class ActionContext:
+    """Runtime context shared by the benchmark action runner and actions."""
+
+    name: str
+    vm: object
+    timestamp: str
+    outputdir_host: Path
+    outputdir_guest: Path
+    is_host: bool
+    config: dict
+    action_config: dict
 
 
 @dataclass

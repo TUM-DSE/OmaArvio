@@ -4,13 +4,10 @@
 """nvbandwidth action for GPU bandwidth measurements."""
 
 import json
-from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional
 
-from core.tasks.config import PROJECT_ROOT
-from core.tasks.qemu import QemuVm, HostRunner
-from core.tasks.utils.utils import get_benchmark_output_path
+from core.tasks.actions import ActionContext
 from core.tasks.actions.registry import register_action
 
 
@@ -36,9 +33,7 @@ DEFAULT_BUFFER_SIZES = [
 
 @register_action("nvbandwidth")
 def run_nvbandwidth(
-    name: str,
-    vm: Union[QemuVm, HostRunner],
-    timestamp: Optional[str] = None,
+    ctx: ActionContext,
     verbose: bool = False,
     buffer_sizes: Optional[List[int]] = None,
 ) -> Path:
@@ -59,10 +54,9 @@ def run_nvbandwidth(
     Output structure:
         ./bench-result/nvbandwidth/{name}/{timestamp}.json
     """
-    # Use provided timestamp, or generate new one if not provided
-    outputdir_host, outputdir_guest, date = get_benchmark_output_path(
-        "nvbandwidth", name, timestamp=timestamp
-    )
+    vm = ctx.vm
+    date = ctx.timestamp
+    outputdir_host = ctx.outputdir_host
     output_file = outputdir_host / f"{date}.json"
 
     # Always use hardcoded testcases, allow buffer size override
@@ -95,7 +89,7 @@ def run_nvbandwidth(
                 output_data = json.loads(result.stdout)
                 # Add metadata for this run
                 output_data["_metadata"] = {
-                    "name": name,
+                    "name": ctx.name,
                     "timestamp": date,
                     "buffer_size_mib": current_size,
                     "testcases": testcases,
@@ -108,7 +102,7 @@ def run_nvbandwidth(
                     {
                         "raw_output": result.stdout,
                         "_metadata": {
-                            "name": name,
+                            "name": ctx.name,
                             "timestamp": date,
                             "buffer_size_mib": current_size,
                             "parse_error": True,
@@ -121,7 +115,7 @@ def run_nvbandwidth(
                 {
                     "error": str(e),
                     "_metadata": {
-                        "name": name,
+                        "name": ctx.name,
                         "timestamp": date,
                         "buffer_size_mib": current_size,
                         "execution_error": True,
@@ -133,7 +127,7 @@ def run_nvbandwidth(
     final_output = {
         "results": all_results,
         "suite_metadata": {
-            "name": name,
+            "name": ctx.name,
             "timestamp": date,
             "total_runs": len(all_results),
         },

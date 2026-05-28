@@ -5,13 +5,10 @@
 
 import json
 import re
-from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional
 
-from core.tasks.config import PROJECT_ROOT
-from core.tasks.qemu import QemuVm, HostRunner
-from core.tasks.utils.utils import get_benchmark_output_path
+from core.tasks.actions import ActionContext
 from core.tasks.actions.registry import register_action
 
 
@@ -185,9 +182,7 @@ def parse_tcrypt_dmesg_output(dmesg_output: str, mode: int) -> dict:
 
 @register_action("tcrypt")
 def run_tcrypt_benchmark(
-    name: str,
-    vm: Union[QemuVm, HostRunner],
-    timestamp: Optional[str] = None,
+    ctx: ActionContext,
     modes: Optional[List[tuple]] = None,
 ) -> Path:
     """Run tcrypt kernel module benchmark on VM or host.
@@ -205,10 +200,9 @@ def run_tcrypt_benchmark(
     Output structure:
         ./bench-result/tcrypt/{name}/{timestamp}.json
     """
-    # Use provided timestamp, or generate new one if not provided
-    outputdir_host, outputdir_guest, date = get_benchmark_output_path(
-        "tcrypt", name, timestamp=timestamp
-    )
+    vm = ctx.vm
+    date = ctx.timestamp
+    outputdir_host = ctx.outputdir_host
     output_file = outputdir_host / f"{date}.json"
 
     # Use default modes if not specified
@@ -263,7 +257,7 @@ def run_tcrypt_benchmark(
     output_data = {
         "results": all_results,
         "_metadata": {
-            "name": name,
+            "name": ctx.name,
             "timestamp": date,
             "modes": [m[0] for m in modes],  # Extract mode numbers
             "duration_per_test": RUNTIME,

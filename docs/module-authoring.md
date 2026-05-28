@@ -152,12 +152,10 @@ Each module's `tasks/__init__.py` should expose a `register(ns)` function:
 
 
 def register(ns):
-    from invoke import Collection
-
-    import modules.example.tasks.actions  # noqa: F401 - registers actions
+    from core.tasks.actions.module import register_module
     from modules.example.tasks import commands
 
-    ns.add_collection(Collection.from_module(commands))
+    register_module(ns, actions="modules.example.tasks.actions", commands=commands)
 ```
 
 Use task commands for user-facing `inv <collection>.<task>` commands. These
@@ -173,7 +171,7 @@ task that calls `vm_start(...)`.
 
 ```python
 from core.tasks.actions.registry import register_action
-from core.tasks.utils.utils import get_benchmark_output_path
+from core.tasks.actions import ActionContext
 
 
 def _example_path(name: str, action_config: dict) -> tuple[str, ...]:
@@ -182,17 +180,21 @@ def _example_path(name: str, action_config: dict) -> tuple[str, ...]:
 
 
 @register_action("example", path_fn=_example_path)
-def run_example(name, vm, timestamp=None, variant="default", **kwargs):
-    outputdir_host, outputdir_guest, date = get_benchmark_output_path(
-        "example", name, variant, timestamp=timestamp
-    )
-    result = vm.ssh_cmd(["example-tool", "--variant", variant], check=True)
-    (outputdir_host / f"{date}.txt").write_text(result.stdout)
+def run_example(ctx: ActionContext, variant="default", **kwargs):
+    result = ctx.vm.ssh_cmd(["example-tool", "--variant", variant], check=True)
+    (ctx.outputdir_host / f"{ctx.timestamp}.txt").write_text(result.stdout)
 ```
 
-Keep action output paths compatible with `get_benchmark_output_path`. If you
-define a custom `path_fn`, use the same path components inside the action so SAR,
+The action runner computes the output directory once from `path_fn` and passes it
+through `ActionContext`. Do not call `get_benchmark_output_path` inside actions;
+use `ctx.outputdir_host`, `ctx.outputdir_guest`, and `ctx.timestamp` so SAR,
 perf, VFIO traces, and benchmark outputs land together.
+
+For host-specific devices, construct `Devices` from `core.tasks.utils.device`
+instead of reading `config.toml` directly. `Devices(hostname=None)` resolves
+the current host by default and exposes full and short PCI BDF forms. Storage
+benchmarks should call `devices.storage_target(setup, qemu_nvme=..., spdk=...)`
+to select host NVMe, passthrough NVMe, or QEMU-emulated NVMe consistently.
 
 ### Plotting Tasks
 
@@ -304,22 +306,22 @@ Path flakes only include tracked files in some workflows.
 - Keep task commands and VM actions separate. Commands are user-facing
   orchestration; actions are benchmark implementations run through the common
   host/VM execution path.
+- Declare every cross-module dependency in both the module flake and the root
+  flake wiring. Python imports between modules must match the flake graph.
 - Use explicit Nix wiring for packages, assets, and environment variables.
   Avoid hardcoded `/nix/store` paths or assumptions about the source tree being
   the runtime location.
 - Keep module dependencies explicit in both the module flake and root flake.
   Use `inputs.<dep>.follows = "mod-<dep>"` for active root modules.
-- Do not import from the stale root `tasks/` tree unless deliberately using
-  legacy code that has not been modularized. Prefer `core.tasks.*` and
-  `modules.<name>.tasks.*`.
+- Do not import from a root `tasks/` tree. Prefer `core.tasks.*` and declared
+  `modules.<name>.tasks.*` dependencies.
 - Keep names consistent: the module directory, `mkModulePythonLib` name, and
   Python import path must match. Hyphens are acceptable in root `mod-*` input
   names, but Python module paths need underscores.
 - Keep `nix/guest.nix` declarative and idempotent. Avoid runtime network pulls
   in guest boot services; package inputs through Nix when practical.
-- Keep result layout under `bench-result/<component>/...` via
-  `get_benchmark_output_path` so monitoring artifacts and benchmark results are
-  colocated.
+- Keep result layout under `bench-result/<component>/...` by defining an action
+  `path_fn`; the action runner owns `get_benchmark_output_path`.
 
 ## Verification Checklist
 

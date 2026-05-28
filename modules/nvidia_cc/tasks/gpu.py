@@ -3,13 +3,13 @@
 
 """GPU management tasks using NVIDIA gpu-admin-tools."""
 
-import socket
 from typing import Any, List, Tuple
 
 from invoke import task
 
-from core.tasks.config import PROJECT_ROOT, load_config
+from core.tasks.config import PROJECT_ROOT
 from core.tasks.procs import run
+from core.tasks.utils.device import Devices
 
 
 GPU_TOOLS_CMD = "nvidia-gpu-tools"
@@ -17,19 +17,11 @@ GPU_TOOLS_CMD = "nvidia-gpu-tools"
 
 def _gpu_pci_id() -> str:
     """Return nvidia-gpu-tools selector arguments"""
-    cfg = load_config()
-    hostname = socket.gethostname()
-
-    if hostname not in cfg.hosts:
-        known_hosts = ", ".join(sorted(cfg.hosts))
-        raise ValueError(
-            f"No host config found for '{hostname}'. Known hosts: {known_hosts}"
-        )
-
-    gpu_bdf = cfg.hosts[hostname].gpu_pci
+    devices = Devices()
+    gpu_bdf = devices.gpu_pci
     if gpu_bdf is None:
         raise ValueError(
-            f"No GPU PCI BDF configured for host '{hostname}'. "
+            f"No GPU PCI BDF configured for host '{devices.hostname}'. "
             f"Please add gpu_pci to config.toml."
         )
     return gpu_bdf

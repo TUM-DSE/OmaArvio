@@ -3,4 +3,6 @@
 
 def register(ns):
     """Register crypto module into the given Collection (side-effect imports only)."""
-    import modules.crypto.tasks.actions  # noqa: F401 — registers openssl/tcrypt actions
+    from core.tasks.actions.module import register_module
+
+    register_module(ns, actions="modules.crypto.tasks.actions")

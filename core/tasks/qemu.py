@@ -64,7 +64,9 @@ class QmpSession:
             self._raise_unexpected_msg(res)
         yield res
 
-    def send(self, cmd: str, args: Dict[str, str] = {}) -> Dict[str, str]:
+    def send(self, cmd: str, args: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        if args is None:
+            args = {}
         data: Dict[str, Any] = dict(execute=cmd)
         if args != {}:
             data["arguments"] = args
@@ -209,13 +211,17 @@ def ssh_cmd(port: int) -> List[str]:
 
 class QemuVm:
     def __init__(
-        self, qmp_session: QmpSession, tmux_session: str, pid: int, config: dict = {}
+        self,
+        qmp_session: QmpSession,
+        tmux_session: str,
+        pid: int,
+        config: Optional[dict] = None,
     ) -> None:
         self.qmp_session = qmp_session
         self.tmux_session = tmux_session
         self.pid = pid
         self.ssh_port = get_ssh_port(qmp_session)
-        self.config = config
+        self.config = config or {}
 
     def events(self) -> Iterator[Dict[str, Any]]:
         return self.qmp_session.events()
@@ -254,7 +260,7 @@ class QemuVm:
     def ssh_cmd(
         self,
         argv: List[str],
-        extra_env: Dict[str, str] = {},
+        extra_env: Optional[Dict[str, str]] = None,
         check: bool = True,
         stdin: ChildFd = None,
         stdout: ChildFd = subprocess.PIPE,
@@ -268,6 +274,8 @@ class QemuVm:
         @return: CompletedProcess.stderr/stdout contains output of `cmd` which
         is run in the vm via ssh.
         """
+        if extra_env is None:
+            extra_env = {}
         env_cmd = []
         if len(extra_env):
             env_cmd.append("env")
@@ -316,11 +324,11 @@ class QemuVm:
         """
         subprocess.run(["tmux", "-L", self.tmux_session, "attach"])
 
-    def send(self, cmd: str, args: Dict[str, str] = {}) -> Dict[str, str]:
+    def send(self, cmd: str, args: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """
         Send a Qmp command (https://wiki.qemu.org/Documentation/QMP)
         """
-        return self.qmp_session.send(cmd, args)
+        return self.qmp_session.send(cmd, args or {})
 
     def pin_vcpu(self, pcpu_base: int = 0) -> None:
         """Pin vCPUs to physical CPUs"""
@@ -391,7 +399,9 @@ class HostRunner:
     the VM size configuration, and /share is bind-mounted to PROJECT_ROOT.
     """
 
-    def __init__(self, config: dict = {}) -> None:
+    def __init__(self, config: Optional[dict] = None) -> None:
+        if config is None:
+            config = {}
         self.config = config
         self.ssh_port = None  # Not applicable for host
         self.pid = os.getpid()  # Just use our own PID
@@ -431,7 +441,7 @@ class HostRunner:
     def ssh_cmd(
         self,
         argv: List[str],
-        extra_env: Dict[str, str] = {},
+        extra_env: Optional[Dict[str, str]] = None,
         check: bool = True,
         stdin: ChildFd = None,
         stdout: ChildFd = subprocess.PIPE,
@@ -450,6 +460,9 @@ class HostRunner:
 
         @return: CompletedProcess.stderr/stdout contains output of `cmd`
         """
+        if extra_env is None:
+            extra_env = {}
+
         # Translate /share paths to host paths
         if cwd and cwd.startswith("/share/"):
             host_cwd = PROJECT_ROOT / cwd[7:]  # Remove "/share/" prefix
@@ -513,7 +526,7 @@ class HostRunner:
         except KeyboardInterrupt:
             print("\nExiting host runner")
 
-    def send(self, cmd: str, args: Dict[str, str] = {}) -> Dict[str, str]:
+    def send(self, cmd: str, args: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """Not applicable for host runner"""
         raise NotImplementedError("send() not supported for host runner")
 
@@ -541,7 +554,7 @@ class HostRunner:
 
 
 @contextmanager
-def spawn_host_runner(config: dict = {}) -> Iterator[HostRunner]:
+def spawn_host_runner(config: Optional[dict] = None) -> Iterator[HostRunner]:
     """Spawn a host runner for executing commands on the host.
 
     Args:
@@ -565,11 +578,17 @@ def spawn_host_runner(config: dict = {}) -> Iterator[HostRunner]:
 @contextmanager
 def spawn_qemu(
     qemu_command: List[str],
-    extra_args: List[str] = [],
-    extra_args_pre: List[str] = [],
+    extra_args: Optional[List[str]] = None,
+    extra_args_pre: Optional[List[str]] = None,
     numa_node: Optional[List[int]] = None,
-    config: dict = {},
+    config: Optional[dict] = None,
 ) -> Iterator[QemuVm]:
+    if extra_args is None:
+        extra_args = []
+    if extra_args_pre is None:
+        extra_args_pre = []
+    if config is None:
+        config = {}
     with TemporaryDirectory() as tempdir:
         qmp_socket = Path(tempdir).joinpath("qmp.sock")
         cmd = extra_args_pre.copy()

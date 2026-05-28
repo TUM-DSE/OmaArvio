@@ -3,4 +3,6 @@
 
 def register(ns):
     """Register nvme module into the given Collection (side-effect imports only)."""
-    import modules.nvme.tasks.actions  # noqa: F401 — loads nvme utilities
+    from core.tasks.actions.module import register_module
+
+    register_module(ns, actions="modules.nvme.tasks.actions")

@@ -59,6 +59,7 @@
       url = "path:./modules/gdsio";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.core.follows = "core";
+      inputs.nvme.follows = "mod-nvme";
       inputs.mod-nvidia-cc.follows = "mod-nvidia-cc";
     };
     # ─────────────────────────────────────────────────────────────────────────

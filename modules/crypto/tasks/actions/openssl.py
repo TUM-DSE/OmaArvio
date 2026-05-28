@@ -4,13 +4,10 @@
 """OpenSSL speed action for crypto performance measurements."""
 
 import json
-from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional
 
-from core.tasks.config import PROJECT_ROOT
-from core.tasks.qemu import QemuVm, HostRunner
-from core.tasks.utils.utils import get_benchmark_output_path
+from core.tasks.actions import ActionContext
 from core.tasks.actions.registry import register_action
 
 
@@ -74,9 +71,7 @@ def parse_openssl_speed_output(output: str, algorithm: str, block_size: int) -> 
 
 @register_action("openssl")
 def run_openssl_speed(
-    name: str,
-    vm: Union[QemuVm, HostRunner],
-    timestamp: Optional[str] = None,
+    ctx: ActionContext,
     algorithms: Optional[List[str]] = None,
     block_size: int = DEFAULT_BLOCK_SIZE,
     cpu_pin: int = 0,
@@ -97,10 +92,9 @@ def run_openssl_speed(
     Output structure:
         ./bench-result/openssl/{name}/{timestamp}.json
     """
-    # Use provided timestamp, or generate new one if not provided
-    outputdir_host, outputdir_guest, date = get_benchmark_output_path(
-        "openssl", name, timestamp=timestamp
-    )
+    vm = ctx.vm
+    date = ctx.timestamp
+    outputdir_host = ctx.outputdir_host
     output_file = outputdir_host / f"{date}.json"
 
     # Use default algorithms if not specified
@@ -140,7 +134,7 @@ def run_openssl_speed(
     output_data = {
         "results": all_results,
         "_metadata": {
-            "name": name,
+            "name": ctx.name,
             "timestamp": date,
             "algorithms": algorithms,
             "block_size": block_size,

@@ -2,18 +2,17 @@
 from pathlib import Path
 from typing import Optional
 
-from core.tasks.config import PROJECT_ROOT
+from core.tasks.actions import ActionContext
 from core.tasks.qemu import QemuVm, HostRunner
-from core.tasks.utils.utils import get_benchmark_output_path
 from core.tasks.actions.registry import register_action
-from modules.fio.tasks.actions.storage import (
+from modules.nvme.tasks.utils.storage import (
     format_plain_device,
     cleanup_encrypted_device,
     parse_size_to_mb,
 )
 
 ELBENCHO_IMAGE = "breuner/elbencho:master-ubuntu-cuda-multiarch"
-ELBENCHO_JOBS_DIR = PROJECT_ROOT / "elbencho" / "jobs"
+ELBENCHO_JOBS_DIR = Path("/shared/modules/gdsio/elbencho")
 ELBENCHO_MOUNT = "/mnt/encrypted"
 
 
@@ -66,9 +65,7 @@ def _elbencho_path(name: str, config: dict) -> tuple:
 
 @register_action("elbencho", path_fn=_elbencho_path)
 def run_elbencho(
-    name: str,
-    vm: QemuVm,
-    timestamp: Optional[str] = None,
+    ctx: ActionContext,
     dev_path: str = None,
     file_size: str = "2t",
     gds: bool = False,
@@ -83,9 +80,10 @@ def run_elbencho(
     if not dev_path:
         raise ValueError("dev_path is required for elbencho benchmark")
 
-    outputdir_host, outputdir_guest, date = get_benchmark_output_path(
-        "elbencho", name, timestamp=timestamp
-    )
+    vm = ctx.vm
+    outputdir_host = ctx.outputdir_host
+    outputdir_guest = ctx.outputdir_guest
+    date = ctx.timestamp
 
     # 1. Format ext4 and create test file at /mnt/encrypted/testfile
     # Partition is 10% larger than the testfile to accommodate filesystem overhead.
@@ -130,7 +128,7 @@ def run_elbencho(
 
     # On the host runner /share is only mounted inside systemd-run, not under bypass=True.
     # Use the real host path for copy; in the VM use the /share guest path.
-    is_host = isinstance(vm, HostRunner)
+    is_host = ctx.is_host
     copy_dest_dir = outputdir_host if is_host else outputdir_guest
 
     for job_file in job_files:

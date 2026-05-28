@@ -3,21 +3,13 @@
 
 import contextlib
 import itertools
-import socket
 import time
 
 from invoke import task
 
-from core.tasks.config import (
-    DEFAULT_VALID_PCIE_SPEEDS,
-    DEVICE_CONFIG,
-    QEMU_NVME_DEV_PATH,
-    QEMU_NVME_PCI,
-    VM_DEVICE_ADDRESSES,
-)
 from core.tasks.plotting import plot_sar
-from core.tasks.vm import start as vm_start
-from core.tasks.utils.device import get_dev_path, get_nvme_pci, get_valid_pcie_speeds
+from core.tasks import vm as vm_tasks
+from core.tasks.utils.device import Devices
 from core.tasks.utils.pci import check_speed
 from modules.fio.tasks.actions.storage import FioJobConfig
 from modules.fio.tasks.plotting import plot_fio
@@ -41,42 +33,6 @@ FIO_JOBS = [
 ]
 
 
-def _hostname(hostname: str = None) -> str:
-    return hostname or socket.gethostname()
-
-
-def _get_nvme_vfio_device(hostname: str) -> str:
-    return get_nvme_pci(hostname).replace("0000:", "")
-
-
-def _get_valid_speeds(hostname: str):
-    try:
-        return get_valid_pcie_speeds(hostname)
-    except Exception:
-        return DEVICE_CONFIG.get(hostname, {}).get(
-            "valid_speeds", DEFAULT_VALID_PCIE_SPEEDS
-        )
-
-
-def get_fio_filename(
-    job: str, setup: str, hostname: str, qemu_nvme: bool = False
-) -> str:
-    """Convert a storage setup to the FIO filename parameter."""
-    cfg = FioJobConfig.from_job_name(job)
-    if cfg.engine == "spdk":
-        if qemu_nvme:
-            pci_addr = QEMU_NVME_PCI
-        elif setup == "host":
-            pci_addr = get_nvme_pci(hostname)
-        else:
-            pci_addr = VM_DEVICE_ADDRESSES[setup]
-        return f"trtype=PCIe traddr={pci_addr.replace(':', '.')} ns=1"
-
-    if qemu_nvme:
-        return QEMU_NVME_DEV_PATH
-    return get_dev_path(hostname)
-
-
 @task(name="run-tests")
 def run_tests(
     ctx,
@@ -98,31 +54,18 @@ def run_tests(
     precondition_scheme: str = None,
 ):
     """Run multiple FIO jobs for a VM or host configuration."""
-    hostname_actual = _hostname(hostname)
     job_list = [j.strip() for j in jobs.split(",")] if jobs else FIO_JOBS
-
-    if qemu_nvme:
-        if setup == "host":
-            raise ValueError("QEMU NVMe is not available for host setup")
-        vfio_nvme = None
-        dev_path = QEMU_NVME_DEV_PATH
-        pci_dev = QEMU_NVME_PCI
-    else:
-        nvme_device = _get_nvme_vfio_device(hostname_actual)
-        vfio_nvme = nvme_device if setup != "host" else None
-        dev_path = get_dev_path(hostname_actual)
-        pci_dev = (
-            get_nvme_pci(hostname_actual)
-            if setup == "host"
-            else VM_DEVICE_ADDRESSES[setup]
-        )
-        valid_speeds = _get_valid_speeds(hostname_actual)
+    devices = Devices(hostname)
 
     results = []
     for job in job_list:
-        filename = get_fio_filename(
-            job, setup, hostname=hostname_actual, qemu_nvme=qemu_nvme
+        cfg = FioJobConfig.from_job_name(job)
+        target = devices.storage_target(
+            setup,
+            qemu_nvme=qemu_nvme,
+            spdk=cfg.engine == "spdk",
         )
+        filename = target.filename
         bs_str = f" block_size={block_size}" if block_size else ""
         print(f"Running: {setup}-{size} job={job} filename={filename}{bs_str}")
         start_time = time.time()
@@ -131,15 +74,19 @@ def run_tests(
             speed_ctx = (
                 contextlib.nullcontext()
                 if qemu_nvme
-                else check_speed(nvme_device, verbose=True, valid_speeds=valid_speeds)
+                else check_speed(
+                    target.pci_dev,
+                    verbose=True,
+                    valid_speeds=target.valid_pcie_speeds,
+                )
             )
             with speed_ctx:
                 action_cfg = {
                     "job": job,
                     "filename": filename,
-                    "dev_path": dev_path,
+                    "dev_path": target.dev_path,
                     "device_size": device_size,
-                    "pci_dev": pci_dev,
+                    "pci_dev": target.pci_dev,
                     "force_mps": force_mps,
                     "skip_precondition": qemu_nvme,
                     "precondition_scheme": precondition_scheme,
@@ -147,7 +94,7 @@ def run_tests(
                 if block_size is not None:
                     action_cfg["block_size"] = int(block_size)
 
-                vm_start(
+                vm_tasks.start(
                     ctx,
                     type=setup,
                     size=size,
@@ -161,7 +108,7 @@ def run_tests(
                     vfio_trace=vfio_trace,
                     nvme=qemu_nvme,
                     nvme_size=nvme_size,
-                    vfio_pcie=[vfio_nvme] if vfio_nvme else [],
+                    vfio_pcie=[target.vfio_device] if target.vfio_device else [],
                     action_config=action_cfg,
                 )
 

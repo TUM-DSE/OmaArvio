@@ -7,6 +7,11 @@
       url = "path:../../core";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nvme = {
+      url = "path:../nvme";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.core.follows = "core";
+    };
     mod-nvidia-cc = {
       url = "path:../nvidia_cc";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -14,7 +19,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, core, mod-nvidia-cc }:
+  outputs = { self, nixpkgs, core, nvme, mod-nvidia-cc }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -32,7 +37,12 @@
         # Jobs directory in the Nix store; exposed through sharedData.
         gdsio-jobs = pkgs.runCommand "gdsio-jobs" { } ''
           mkdir -p $out
-          install -m 0444 ${./jobs}/*.gdsio $out/
+          jobs_src=${./jobs}
+          install -m 0444 $jobs_src/*.gdsio $out/
+          if [ -d "$jobs_src/elbencho" ]; then
+            mkdir -p $out/elbencho
+            find "$jobs_src/elbencho" -name '*.elbencho' -exec install -m 0444 {} $out/elbencho/ \;
+          fi
         '';
       };
 

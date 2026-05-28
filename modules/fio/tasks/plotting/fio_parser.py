@@ -328,7 +328,7 @@ def correlate_with_sar(
         The same dict with cpu_used_pct, mem_used_kb, sar_sample_count populated
         for jobs that have a valid time window and matching SAR samples.
     """
-    from tasks.plotting.sar_parser import parse_sar_file, get_window_average
+    from core.tasks.plotting.sar_parser import parse_sar_file, get_window_average
 
     sar_data = parse_sar_file(guest_sar_path)
 

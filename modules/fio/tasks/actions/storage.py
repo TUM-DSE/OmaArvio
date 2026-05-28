@@ -2,23 +2,24 @@
 # -*- coding: utf-8 -*-
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import json
-import subprocess
-import re
-import time
-from core.tasks.config import PROJECT_ROOT
 from core.tasks.qemu import QemuVm, HostRunner, setup_hugepages
-from core.tasks.utils.utils import get_benchmark_output_path
+from core.tasks.actions import ActionContext
+from modules.nvme.tasks.utils.storage import (
+    cleanup_encrypted_device,
+    format_dmverity_device,
+    format_fsverity_device,
+    format_luks_aegis128_device,
+    format_luks_aes_device,
+    format_luks_aes_xts_device,
+    format_plain_device,
+    parse_job_filesystem,
+)
 
 # Import NVMe utilities from the nvme module
 from modules.nvme.tasks.utils.nvme import (
-    PRECONDITION_BLOCK_SIZE,
-    get_nvme_lba_formats,
-    get_lbaf_index,
     nvme_secure_erase,
     get_nvme_char_device,
     run_precondition,
@@ -45,471 +46,6 @@ def block_size_label(block_size: int) -> str:
     if block_size >= 1024 and block_size % 1024 == 0:
         return f"{block_size // 1024}k"
     return str(block_size)
-
-
-def parse_size_to_mb(size_str: str) -> int:
-    """Convert size string (e.g., '10G', '512M') to MB.
-
-    Args:
-        size_str: Size string with unit (e.g., '10G', '512M')
-
-    Returns:
-        Size in MB
-    """
-    size_str = size_str.upper().strip()
-    if size_str.endswith("G"):
-        return int(size_str[:-1]) * 1024
-    elif size_str.endswith("M"):
-        return int(size_str[:-1])
-    elif size_str.endswith("T"):
-        return int(size_str[:-1]) * 1024 * 1024
-    else:
-        # Assume MB if no unit
-        return int(size_str)
-
-
-def parse_job_filesystem(job_name: str) -> str:
-    """Extract filesystem type from job name.
-
-    Job name patterns:
-    - luks-{fs}-{cipher}: e.g., luks-ext4-aes, luks-f2fs-aes
-    - dmverity-{fs}: e.g., dmverity-ext4, dmverity-f2fs
-    - fsverity-{fs}: e.g., fsverity-ext4, fsverity-f2fs
-    - {fs}: e.g., ext4, f2fs (plain filesystem)
-
-    Args:
-        job_name: Job name string
-
-    Returns:
-        Filesystem type (ext4 or f2fs)
-
-    Raises:
-        ValueError: If filesystem type cannot be determined
-    """
-    for fs_type in ["ext4", "f2fs"]:
-        if fs_type in job_name:
-            return fs_type
-
-    raise ValueError(f"Cannot determine filesystem from job name: {job_name}")
-
-
-def make_filesystem(vm: QemuVm, device: str, fs_type: str, verity: bool = False):
-    """Create filesystem on device.
-
-    Args:
-        vm: QemuVm or HostRunner instance
-        device: Device path
-        fs_type: Filesystem type (ext4 or f2fs)
-        verity: Enable fs-verity feature (only for ext4)
-
-    Raises:
-        ValueError: If filesystem type is unsupported
-    """
-    if fs_type == "ext4":
-        cmd = ["mkfs.ext4", "-F"]
-        if verity:
-            cmd.extend(["-O", "verity"])
-        cmd.append(device)
-    elif fs_type == "f2fs":
-        cmd = ["mkfs.f2fs", "-f"]
-        if verity:
-            # f2fs has built-in verity support via -O option
-            cmd.extend(["-O", "verity"])
-        cmd.append(device)
-    else:
-        raise ValueError(f"Unsupported filesystem type: {fs_type}")
-
-    vm.ssh_cmd(cmd, check=True, bypass=True)
-
-
-def create_test_file(
-    vm: QemuVm, mount_point: str, filename: str = "testfile", size_mb: int = None
-):
-    """Create test file with random data.
-
-    Args:
-        vm: QemuVm or HostRunner instance
-        mount_point: Mount point where the file should be created
-        filename: Name of the test file (default: testfile)
-        size_mb: Size of file in MB (default: 9216 MB, which is 10GB - 10%)
-    """
-    if size_mb is None:
-        size_mb = 9216  # 10GB - 10%
-    print(f"Creating test file with random data ({size_mb}MB)...")
-    vm.ssh_cmd(
-        [
-            "dd",
-            "if=/dev/urandom",
-            f"of={mount_point}/{filename}",
-            "bs=1M",
-            f"count={size_mb}",
-            "status=progress",
-        ],
-        check=True,
-    )
-
-
-def get_partition_name(device: str, partition_num: int) -> str:
-    """Get partition name for a device.
-
-    Handles different device path formats:
-    - /dev/disk/by-id/ paths use -partX suffix
-    - NVMe block devices use pX suffix
-    - Other devices use just the number
-
-    Args:
-        device: Device path (e.g., /dev/disk/by-id/nvme-XXX or /dev/nvme0n1)
-        partition_num: Partition number (1, 2, etc.)
-
-    Returns:
-        Full partition path with correct suffix
-    """
-    if device.startswith("/dev/disk/by-id/"):
-        return f"{device}-part{partition_num}"
-    elif "nvme" in device:
-        return f"{device}p{partition_num}"
-    else:
-        return f"{device}{partition_num}"
-
-
-def create_partition(vm: QemuVm, device: str, partitions: list):
-    """Create partitions on device using parted.
-
-    Args:
-        vm: QemuVm or HostRunner instance
-        device: Device path
-        partitions: List of (start, end) tuples for each partition
-                   e.g., [("0%", "10G"), ("10G", "100%")]
-    """
-    # Build parted command
-    parted_cmd = ["parted", "-s", device, "mklabel", "gpt"]
-
-    for start, end in partitions:
-        parted_cmd.extend(["mkpart", "primary", start, end])
-
-    vm.ssh_cmd(parted_cmd, check=True, bypass=True)
-
-    # Force kernel to re-read partition table
-    vm.ssh_cmd(["partprobe", device], check=False, bypass=True)
-
-    # Small delay to ensure partitions are fully visible
-    time.sleep(0.5)
-
-
-def format_luks_device_with_mode(
-    vm: QemuVm,
-    device: str,
-    fs_type: str,
-    size: str = "10G",
-    passphrase: str = "test",
-    cipher: str = "aes-xts-plain64",
-    integrity: str = None,
-    key_size: int = None,
-) -> str:
-    """Format device with LUKS encryption (supports different cipher modes).
-
-    Args:
-        vm: QemuVm or HostRunner instance
-        device: Device path
-        fs_type: Filesystem type (ext4 or f2fs)
-        size: Partition size
-        passphrase: LUKS passphrase
-        cipher: Cipher mode (aes-xts-plain64, aegis128-random, aes-gcm-random)
-        integrity: Integrity algorithm (None, poly1305, hmac-sha256)
-
-    Returns:
-        Path to test file for FIO: /mnt/encrypted/testfile
-    """
-    print(
-        f"Formatting LUKS device: {device} (cipher: {cipher}, size: {size}, fs: {fs_type})"
-    )
-
-    # Create partition
-    create_partition(vm, device, [("0%", size)])
-    partition = get_partition_name(device, 1)
-
-    # Build LUKS format command
-    luks_cmd = [
-        "cryptsetup",
-        "luksFormat",
-        "--batch-mode",
-        "--type=luks2",
-        f"--cipher={cipher}",
-    ]
-
-    if integrity:
-        luks_cmd.append(f"--integrity={integrity}")
-
-    if key_size:
-        luks_cmd.append(f"--key-size={key_size}")
-
-    luks_cmd.append(partition)
-
-    # Format with LUKS
-    vm.ssh_cmd(luks_cmd, check=True, input=f"{passphrase}\n{passphrase}\n", bypass=True)
-
-    # Open LUKS device
-    vm.ssh_cmd(
-        ["cryptsetup", "open", partition, "luks-encrypted"],
-        check=True,
-        input=f"{passphrase}\n",
-        bypass=True,
-    )
-
-    # Create filesystem
-    make_filesystem(vm, "/dev/mapper/luks-encrypted", fs_type)
-
-    # Create mount point and mount
-    vm.ssh_cmd(["mkdir", "-p", "/mnt/encrypted"], check=True, bypass=True)
-    vm.ssh_cmd(
-        ["mount", "/dev/mapper/luks-encrypted", "/mnt/encrypted"],
-        check=True,
-        bypass=True,
-    )
-
-    # Create test file with random data (FS size - 20%)
-    fs_size_mb = int(parse_size_to_mb(size) * 0.8)
-    create_test_file(vm, "/mnt/encrypted", size_mb=fs_size_mb)
-
-    return "/mnt/encrypted/testfile"
-
-
-def format_luks_aes_device(
-    vm: QemuVm, device: str, fs_type: str, size: str = "10G", passphrase: str = "test"
-) -> str:
-    """LUKS with AES-XTS-256 (standard LUKS2 mode)."""
-    return format_luks_device_with_mode(
-        vm, device, fs_type, size, passphrase, cipher="aes-xts-plain64", integrity=None
-    )
-
-
-def format_luks_aegis128_device(
-    vm: QemuVm, device: str, fs_type: str, size: str = "10G", passphrase: str = "test"
-) -> str:
-    """LUKS with AEGIS-128 authenticated encryption."""
-    return format_luks_device_with_mode(
-        vm,
-        device,
-        fs_type,
-        size,
-        passphrase,
-        cipher="aegis128-plain64",
-        integrity="aead",
-        key_size=128,
-    )
-
-
-def format_luks_aes_xts_device(
-    vm: QemuVm, device: str, fs_type: str, size: str = "10G", passphrase: str = "test"
-) -> str:
-    """LUKS with AES-XTS + HMAC-SHA256."""
-    return format_luks_device_with_mode(
-        vm,
-        device,
-        fs_type,
-        size,
-        passphrase,
-        cipher="aes-xts-random",
-        integrity="hmac-sha256",
-    )
-
-
-def format_dmverity_device(
-    vm: QemuVm, device: str, fs_type: str, size: str = "10G"
-) -> str:
-    """Format device with dm-verity integrity checking and create test file.
-
-    Args:
-        vm: QemuVm or HostRunner instance
-        device: Device path (e.g., /dev/nvme0n1)
-        fs_type: Filesystem type (ext4 or f2fs)
-        size: Partition size (default: 10G)
-
-    Returns:
-        Path to test file for FIO: /mnt/encrypted/testfile
-    """
-    print(f"Formatting dm-verity device: {device} (size: {size}, fs: {fs_type})")
-
-    # Create two partitions: data (size) and hash (2GB)
-    create_partition(
-        vm, device, [("0%", size), (size, f"{parse_size_to_mb(size) + 2048}M")]
-    )
-
-    data_partition = get_partition_name(device, 1)
-    hash_partition = get_partition_name(device, 2)
-
-    # Create filesystem on data partition
-    make_filesystem(vm, data_partition, fs_type)
-
-    # Mount temporarily to create test file
-    vm.ssh_cmd(["mkdir", "-p", "/mnt/encrypted"], check=True, bypass=True)
-    vm.ssh_cmd(["mount", data_partition, "/mnt/encrypted"], check=True, bypass=True)
-
-    # Create test file with random data (data partition size - 20%)
-    data_partition_mb = int(parse_size_to_mb(size) * 0.8)
-    create_test_file(vm, "/mnt/encrypted", size_mb=data_partition_mb)
-
-    # Unmount
-    vm.ssh_cmd(["umount", "/mnt/encrypted"], check=True, bypass=True)
-
-    # Create dm-verity hash table
-    print("Creating dm-verity hash table...")
-    result = vm.ssh_cmd(
-        ["veritysetup", "format", data_partition, hash_partition],
-        check=False,
-        bypass=True,
-    )
-    # Extract root hash from output
-    root_hash = None
-    for line in result.stdout.splitlines():
-        if "Root hash:" in line:
-            root_hash = line.split("Root hash:")[1].strip()
-            break
-
-    if not root_hash:
-        raise RuntimeError("Failed to extract root hash from veritysetup output")
-
-    print(f"Root hash: {root_hash}")
-
-    # Open dm-verity device (read-only)
-    vm.ssh_cmd(
-        ["veritysetup", "open", data_partition, "verity", hash_partition, root_hash],
-        check=True,
-        bypass=True,
-    )
-
-    # Mount dm-verity device (read-only)
-    vm.ssh_cmd(["mkdir", "-p", "/mnt/encrypted"], check=True, bypass=True)
-    vm.ssh_cmd(
-        ["mount", "-o", "ro", "/dev/mapper/verity", "/mnt/encrypted"],
-        check=True,
-        bypass=True,
-    )
-
-    return "/mnt/encrypted/testfile"
-
-
-def format_fsverity_device(
-    vm: QemuVm, device: str, fs_type: str, size: str = "10G"
-) -> str:
-    """Format device with fs-verity enabled filesystem and create test file.
-
-    Args:
-        vm: QemuVm or HostRunner instance
-        device: Device path (e.g., /dev/nvme0n1)
-        fs_type: Filesystem type (ext4 or f2fs)
-        size: Partition size (default: 10G)
-
-    Returns:
-        Path to test file for FIO: /mnt/encrypted/testfile
-    """
-    print(f"Formatting fs-verity device: {device} (size: {size}, fs: {fs_type})")
-
-    # Create partition
-    create_partition(vm, device, [("0%", size)])
-
-    partition = get_partition_name(device, 1)
-
-    # Create filesystem with verity feature
-    make_filesystem(vm, partition, fs_type, verity=True)
-
-    # Mount filesystem
-    vm.ssh_cmd(["mkdir", "-p", "/mnt/encrypted"], check=True, bypass=True)
-    vm.ssh_cmd(["mount", partition, "/mnt/encrypted"], check=True, bypass=True)
-
-    # Create test file with random data (FS size - 20%)
-    fs_size_mb = int(parse_size_to_mb(size) * 0.8)
-    create_test_file(vm, "/mnt/encrypted", size_mb=fs_size_mb)
-
-    # Enable fs-verity on test file
-    print("Enabling fs-verity on test file...")
-    vm.ssh_cmd(
-        ["fsverity", "enable", "/mnt/encrypted/testfile"], check=True, bypass=True
-    )
-
-    # Verify fs-verity is enabled
-    vm.ssh_cmd(
-        ["fsverity", "measure", "/mnt/encrypted/testfile"], check=True, bypass=True
-    )
-
-    return "/mnt/encrypted/testfile"
-
-
-def format_plain_device(
-    vm: QemuVm,
-    device: str,
-    fs_type: str,
-    size: str = "10G",
-    file_size: str = None,
-    mount_options: list = None,
-) -> str:
-    """Format device with plain filesystem and create test file.
-
-    Args:
-        vm: QemuVm or HostRunner instance
-        device: Device path (e.g., /dev/nvme0n1)
-        fs_type: Filesystem type (ext4 or f2fs)
-        size: Partition size (default: 10G)
-
-    Returns:
-        Path to test file for FIO: /mnt/encrypted/testfile
-    """
-    print(f"Formatting plain device: {device} (size: {size}, fs: {fs_type})")
-
-    # Create partition
-    create_partition(vm, device, [("0%", size)])
-    partition = get_partition_name(device, 1)
-
-    # Create filesystem
-    make_filesystem(vm, partition, fs_type)
-
-    # Mount filesystem
-    vm.ssh_cmd(["mkdir", "-p", "/mnt/encrypted"], check=True, bypass=True)
-    mount_cmd = ["mount"]
-    if mount_options:
-        mount_cmd += ["-o", ",".join(mount_options)]
-    mount_cmd += [partition, "/mnt/encrypted"]
-    vm.ssh_cmd(mount_cmd, check=True, bypass=True)
-
-    # Create test file with random data
-    fs_size_mb = (
-        int(parse_size_to_mb(file_size))
-        if file_size is not None
-        else int(parse_size_to_mb(size) * 0.8)
-    )
-    create_test_file(vm, "/mnt/encrypted", size_mb=fs_size_mb)
-
-    return "/mnt/encrypted/testfile"
-
-
-def cleanup_encrypted_device(vm: QemuVm, encryption_type: str, device: str):
-    """Cleanup encrypted device setup.
-
-    Args:
-        vm: QemuVm or HostRunner instance
-        encryption_type: Type of encryption (ext4, luks-aes, luks-aegis128, luks-aes-gcm, dmverity, fsverity)
-        device: Device path (e.g., /dev/nvme0n1)
-    """
-    print(f"Cleaning up {encryption_type} device...")
-
-    try:
-        # Unmount
-        vm.ssh_cmd(["umount", "/mnt/encrypted"], check=False, bypass=True)
-
-        # Close encryption mappings
-        # All LUKS variants use same cleanup
-        if encryption_type.startswith("luks-"):
-            vm.ssh_cmd(
-                ["cryptsetup", "close", "luks-encrypted"], check=False, bypass=True
-            )
-        elif encryption_type == "dmverity":
-            vm.ssh_cmd(["veritysetup", "close", "verity"], check=False, bypass=True)
-
-        # Wipe partition table
-        vm.ssh_cmd(["wipefs", "-a", device], check=False, bypass=True)
-
-    except Exception as e:
-        print(f"Warning: Cleanup error (non-fatal): {e}")
 
 
 # --- FIO Job Configuration ---
@@ -659,13 +195,11 @@ def _fio_path(name, action_config):
 
 @register_action("fio", path_fn=_fio_path)
 def run_fio(
-    name: str,
-    vm: QemuVm,
+    ctx: ActionContext,
     job: str = "spdk",
     filename: str = "trtype=PCIe traddr=0000.00.06.0 ns=1",
     dev_path: str = None,
     device_size: str = "10G",
-    timestamp: Optional[str] = None,
     block_size: int = None,
     force_mps: bool = False,
     pci_dev: str = None,
@@ -676,16 +210,15 @@ def run_fio(
     if not pci_dev:
         raise ValueError("pci_dev is required")
 
+    vm = ctx.vm
     effective_job_dirs = [Path(d) for d in job_dirs] if job_dirs else None
     cfg = FioJobConfig.from_job_name(job, effective_job_dirs)
 
-    # Use provided timestamp, or generate new one if not provided
     if block_size is not None:
         block_size = int(block_size)
-    job_dir = f"{job}_bs{block_size_label(block_size)}" if block_size else job
-    outputdir_host, outputdir_guest, date = get_benchmark_output_path(
-        "fio", name, job_dir, timestamp=timestamp
-    )
+    outputdir_host = ctx.outputdir_host
+    outputdir_guest = ctx.outputdir_guest
+    date = ctx.timestamp
     output = outputdir_guest / f"{date}.json"
 
     # Secure erase NVMe device before any runs (and optionally set block size)

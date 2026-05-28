@@ -2,10 +2,10 @@
 from pathlib import Path
 from typing import Optional, List
 
+from core.tasks.actions import ActionContext
 from core.tasks.qemu import QemuVm, HostRunner
-from core.tasks.utils.utils import get_benchmark_output_path
 from core.tasks.actions.registry import register_action
-from modules.fio.tasks.actions.storage import (
+from modules.nvme.tasks.utils.storage import (
     format_plain_device,
     cleanup_encrypted_device,
     parse_size_to_mb,
@@ -46,9 +46,7 @@ def _gdsio_path(name: str, config: dict) -> tuple:
 
 @register_action("gdsio", path_fn=_gdsio_path)
 def run_gdsio(
-    name: str,
-    vm: QemuVm,
-    timestamp: Optional[str] = None,
+    ctx: ActionContext,
     dev_path: str = None,
     file_size: str = "100G",
     xfer_types: Optional[List[int]] = None,
@@ -70,8 +68,9 @@ def run_gdsio(
     if xfer_types is None:
         xfer_types = DEFAULT_XFER_TYPES
 
+    vm = ctx.vm
     # Build the Docker image if it is not already present.
-    is_host = isinstance(vm, HostRunner)
+    is_host = ctx.is_host
     result = vm.ssh_cmd(
         ["docker", "image", "inspect", GDS_IMAGE], check=False, bypass=True
     )
@@ -79,9 +78,9 @@ def run_gdsio(
         print(f"{GDS_IMAGE} Docker image not found, building...")
         vm.ssh_cmd(["build-gds-base-docker"], check=True, bypass=True)
 
-    outputdir_host, outputdir_guest, date = get_benchmark_output_path(
-        "gdsio", name, timestamp=timestamp
-    )
+    outputdir_host = ctx.outputdir_host
+    outputdir_guest = ctx.outputdir_guest
+    date = ctx.timestamp
 
     file_size_mb = int(parse_size_to_mb(file_size))
     partition_size = f"{int(file_size_mb * 1.1)}m"

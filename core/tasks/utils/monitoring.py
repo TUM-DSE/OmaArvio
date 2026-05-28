@@ -1,12 +1,73 @@
-from core.tasks.qemu import HostRunner, QemuVm
-
-
 import signal
 import subprocess
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Union
+
+from core.tasks.config import PROJECT_ROOT
+from core.tasks.qemu import HostRunner, QemuVm
+
+
+@contextmanager
+def monitor_with_sar(
+    vm: Union[QemuVm, HostRunner],
+    output_dir: Path,
+    timestamp: str,
+    config: dict,
+) -> Iterator[None]:
+    """Run sar on host and guest while a benchmark action executes."""
+    sar_enabled = config.get("sar_enabled", True)
+    if not sar_enabled:
+        yield
+        return
+
+    sar_interval = config.get("sar_interval", 1)
+    sar_options = config.get("sar_options", "-u -r -n DEV")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    host_sar_file = output_dir / f"{timestamp}_host_sar.txt"
+    host_sar_proc = None
+
+    try:
+        print(f"Starting host sar monitoring -> {host_sar_file}")
+        host_sar_proc = subprocess.Popen(
+            ["sar"] + sar_options.split() + [str(sar_interval)],
+            stdout=open(host_sar_file, "w"),
+            stderr=subprocess.DEVNULL,
+        )
+
+        if vm and not isinstance(vm, HostRunner):
+            guest_sar_relpath = output_dir.relative_to(PROJECT_ROOT)
+            guest_sar_path = f"/share/{guest_sar_relpath}/{timestamp}_guest_sar.txt"
+            print(f"Starting guest sar monitoring -> {guest_sar_path}")
+            vm.ssh_cmd(
+                [
+                    "sh",
+                    "-c",
+                    f"nohup sar {sar_options} {sar_interval} > {guest_sar_path} 2>&1 &",
+                ],
+                check=False,
+                verbose=True,
+            )
+
+        time.sleep(2)
+        yield
+    finally:
+        print("Stopping sar monitoring...")
+        if host_sar_proc:
+            host_sar_proc.terminate()
+            try:
+                host_sar_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                host_sar_proc.kill()
+                host_sar_proc.wait()
+
+        if vm and not isinstance(vm, HostRunner):
+            vm.ssh_cmd(["pkill", "-TERM", "sar"], check=False, verbose=False)
+            time.sleep(1)
+
+        print("SAR monitoring stopped and data saved")
 
 
 @contextmanager

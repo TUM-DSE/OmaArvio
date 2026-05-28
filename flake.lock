@@ -206,6 +206,9 @@
         ],
         "nixpkgs": [
           "nixpkgs"
+        ],
+        "nvme": [
+          "mod-nvme"
         ]
       },
       "locked": {

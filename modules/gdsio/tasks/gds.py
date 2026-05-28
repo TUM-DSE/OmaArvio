@@ -3,20 +3,14 @@
 import csv
 import io
 import re
-import socket
 import sys
 from pathlib import Path
 
 from invoke import task
 
-# Lazy import: paper_gdsio lives in the non-modularized root tasks package.
-# Only import when the plot task is actually invoked.
-
-
-from core.tasks.vm import start as vm_start
+from core.tasks import vm as vm_tasks
 from core.tasks.utils.iommu import iommu_label
-from core.tasks.utils.device import get_nvme_pci as get_nvme, get_dev_path
-from core.tasks.config import DEVICE_CONFIG
+from core.tasks.utils.device import Devices
 
 _METRIC_FILE_RE = re.compile(
     r"^(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})-(.+)-xfer(\d)\.txt$"
@@ -86,14 +80,9 @@ def plot(
         inv gds.plot --formats pdf,png
         inv gds.plot --bench-dir bench-result/gdsio --output-dir /tmp/plots
     """
-    from tasks.plotting import (
-        paper_gdsio,
-    )  # noqa: PLC0415 — lazy: root tasks not always available
-
-    paper_gdsio.generate_all_plots(
-        bench_dir=Path(bench_dir),
-        output_dir=Path(output_dir),
-        formats=formats.split(","),
+    raise RuntimeError(
+        "gds.plot still needs a modular plotting implementation. "
+        "Use gds.results-csv for current result summarization."
     )
 
 
@@ -191,8 +180,9 @@ def run_elbencho(
         inv gds.run-elbencho --setup host --no-iommu --gds
         inv gds.run-elbencho --setup snp
     """
-    nvme_device, _ = get_nvme()
-    dev_path = get_dev_path()
+    devices = Devices(hostname)
+    nvme_device = devices.nvme_short
+    dev_path = devices.dev_path
     vfio_nvme = None if setup == "host" else nvme_device
 
     # name_extra carries IOMMU/GDS state into the output path for host variants.
@@ -210,7 +200,7 @@ def run_elbencho(
         "gds": gds,
     }
 
-    vm_start(
+    vm_tasks.start(
         ctx,
         type=setup,
         size=size,
@@ -257,8 +247,9 @@ def run_gdsio(
         inv gds.run-gdsio --setup host --xfer-types 0,1
         inv gds.run-gdsio --setup snp
     """
-    nvme_device, _ = get_nvme()
-    dev_path = get_dev_path()
+    devices = Devices(hostname)
+    nvme_device = devices.nvme_short
+    dev_path = devices.dev_path
 
     if setup == "host":
         name_extra = f"-{iommu_label(no_iommu)}"
@@ -279,19 +270,16 @@ def run_gdsio(
     if setup != "host":
         vfio_devices.append(nvme_device)
 
-        hostname_actual = hostname or socket.gethostname()
-        if hostname_actual not in DEVICE_CONFIG:
-            raise ValueError(f"Unknown hostname: {hostname_actual}")
-        gpu_pci = DEVICE_CONFIG[hostname_actual].get("gpu_pci")
-        if gpu_pci is None:
+        gpu_pci = devices.gpu_pci
+        if gpu_pci is None or devices.gpu_short is None:
             raise ValueError(
-                f"No GPU configured for host '{hostname_actual}'. "
-                f"Please add 'gpu_pci' to DEVICE_CONFIG['{hostname_actual}'] in tasks/config.py"
+                f"No GPU configured for host '{devices.hostname}'. "
+                "Please add gpu_pci to config.toml."
             )
-        vfio_devices.append(gpu_pci.replace("0000:", ""))
+        vfio_devices.append(devices.gpu_short)
         print(f"GPU passthrough enabled: {gpu_pci}")
 
-    vm_start(
+    vm_tasks.start(
         ctx,
         type=setup,
         size=size,
