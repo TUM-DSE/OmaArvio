@@ -16,16 +16,26 @@ from core.tasks.actions.runner import (
     run_benchmark_action,
 )
 from core.tasks.actions.registry import get_action
-from core.tasks.config import SSH_PORT
+from core.tasks.config import SSH_PORT, PROJECT_ROOT
 from core.tasks.qemu import spawn_runner
-from core.tasks.qemu_options import (
-    get_amd_qemu_cmd_general,
-    qemu_option_nvme,
-    qemu_option_virtio_blk,
-    qemu_option_virtio_nic,
+from core.tasks.qemu_builder import (
+    get_vm_config,
+    QemuVmBuilder,
+    QemuFeature,
+    CpuMemoryFeature,
+    AmdMachineFeature,
+    BootFeature,
+    UserNetFeature,
+    ConsoleFeature,
+    SharedFolderFeature,
+    VirtioBlkFeature,
+    VirtioNicFeature,
+    NvmeEmulationFeature,
+    VfioGroupFeature,
+    EduFeature,
+    ExtraCmdFeature,
 )
 from core.tasks.resources import get_vm_resource
-from core.tasks.utils.vfio import bind_device_to_vfio, unbind_device_from_vfio
 
 
 def start_and_attach(
@@ -146,24 +156,40 @@ def start(
     name = f"{type}-{'direct' if direct else 'disk'}-{size}" + name_extra
     configure_vfio_trace(config, name, action)
 
-    qemu_cmd = get_amd_qemu_cmd_general(
-        resource,
-        config,
-        qemu_name,
-        direct,
-        type == "snp",
-        edu,
-        config.get("vfio_trace", False),
-        Path(config["vfio_trace_file"]) if config.get("vfio_trace_file") else None,
+    vmconfig = get_vm_config(qemu_name, attestation=attestation)
+
+    builder = QemuVmBuilder(vmconfig.qemu, resource)
+
+    builder.add_feature(CpuMemoryFeature(resource, prealloc=boot_prealloc))
+    builder.add_feature(
+        AmdMachineFeature(
+            confidential=(type == "snp"), hostname=hostname, attestation=attestation
+        )
     )
 
+    builder.add_feature(
+        BootFeature(vmconfig=vmconfig, direct=direct, extra_cmdline=extra_cmdline)
+    )
+
+    builder.add_feature(UserNetFeature(ssh_port=ssh_port))
+    builder.add_feature(ConsoleFeature())
+
+    # Shared folders
+    builder.add_feature(SharedFolderFeature(str(PROJECT_ROOT), "share"))
+    module_shared_data = os.environ.get("MODULE_SHARED_DATA", "")
+    if module_shared_data:
+        builder.add_feature(SharedFolderFeature(module_shared_data, "shared"))
+
     if virtio_nic:
-        qemu_cmd += qemu_option_virtio_nic(
-            tap=virtio_nic_tap,
-            mtap=virtio_nic_mtap,
-            vhost=virtio_nic_vhost,
-            mq=virtio_nic_mq,
-            config=config,
+        builder.add_feature(
+            VirtioNicFeature(
+                tap=virtio_nic_tap,
+                mtap=virtio_nic_mtap,
+                vhost=virtio_nic_vhost,
+                mq=virtio_nic_mq,
+                cpu_count=resource.cpu,
+                iommu_option=virtio_iommu,
+            )
         )
 
     if virtio_blk:
@@ -179,48 +205,47 @@ def start(
         elif not virtio_blk_path.is_file():
             print(f"{virtio_blk_path} is not a file nor a block device")
             return
-        qemu_cmd += qemu_option_virtio_blk(
-            virtio_blk_path,
-            virtio_blk_aio,
-            virtio_blk_direct,
-            virtio_blk_iothread,
-            virtio_iommu,
+        builder.add_feature(
+            VirtioBlkFeature(
+                file_path=virtio_blk_path,
+                aio=virtio_blk_aio,
+                direct=virtio_blk_direct,
+                iothread=virtio_blk_iothread,
+                iommu_option=virtio_iommu,
+            )
         )
 
-    nvme_backing_file = None
     if nvme:
-        print(
-            f"Use emulated NVMe: size={nvme_size}, "
-            f"bps_rd={nvme_bps_rd}, bps_wr={nvme_bps_wr}"
+        builder.add_feature(
+            NvmeEmulationFeature(
+                size=nvme_size,
+                bps_rd=nvme_bps_rd,
+                bps_wr=nvme_bps_wr,
+            )
         )
-        nvme_opts, nvme_backing_file = qemu_option_nvme(
-            size=nvme_size, bps_rd=nvme_bps_rd, bps_wr=nvme_bps_wr
+
+    if vfio_pcie:
+        trace_file = (
+            Path(config["vfio_trace_file"]) if config.get("vfio_trace_file") else None
         )
-        qemu_cmd += nvme_opts
+        builder.add_feature(
+            VfioGroupFeature(
+                pci_ids=vfio_pcie,
+                trace_file=trace_file,
+            )
+        )
+
+    if edu:
+        builder.add_feature(EduFeature())
 
     if extra_qemu_cmd:
-        qemu_cmd += shlex.split(extra_qemu_cmd)
-
-    vfio_original_drivers = {}
-    for device in vfio_pcie:
-        original_driver = bind_device_to_vfio(device)
-        if original_driver:
-            vfio_original_drivers[device] = original_driver
+        builder.add_feature(ExtraCmdFeature(extra_qemu_cmd))
 
     print(f"Starting VM: {name}")
+    builder.setup()
     try:
-        do_action(action, qemu_cmd=qemu_cmd, pin=pin, name=name, config=config)
+        do_action(
+            action, qemu_cmd=builder.build_command(), pin=pin, name=name, config=config
+        )
     finally:
-        if nvme_backing_file:
-            try:
-                os.unlink(nvme_backing_file)
-                print(f"Cleaned up NVMe backing file: {nvme_backing_file}")
-            except OSError as exc:
-                print(f"Warning: Failed to clean up NVMe backing file: {exc}")
-
-        for device in reversed(vfio_pcie):
-            if device in vfio_original_drivers:
-                try:
-                    unbind_device_from_vfio(device, vfio_original_drivers[device])
-                except Exception as exc:
-                    print(f"Warning: Failed to restore {device}: {exc}")
+        builder.teardown()
