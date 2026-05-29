@@ -11,6 +11,7 @@ import socket
 import subprocess
 import psutil
 import time
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
@@ -152,7 +153,72 @@ def ssh_cmd(port: int) -> List[str]:
     ]
 
 
-class QemuVm:
+class Runner(ABC):
+    """Abstract base class defining the API for virtual machines and host runners."""
+
+    @abstractmethod
+    def events(self) -> Iterator[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
+    def wait_for_ssh(self) -> None:
+        pass
+
+    @abstractmethod
+    def ssh_Popen(
+        self,
+        stdout: ChildFd = subprocess.PIPE,
+        stderr: ChildFd = None,
+        stdin: ChildFd = None,
+    ) -> subprocess.Popen:
+        pass
+
+    @abstractmethod
+    def ssh_cmd(
+        self,
+        argv: List[str],
+        extra_env: Optional[Dict[str, str]] = None,
+        check: bool = True,
+        stdin: ChildFd = None,
+        stdout: ChildFd = subprocess.PIPE,
+        stderr: ChildFd = None,
+        verbose: bool = True,
+        input: Optional[str] = None,
+        bypass: bool = False,
+        cwd: Optional[str] = None,
+    ) -> "subprocess.CompletedProcess[Text]":
+        pass
+
+    @abstractmethod
+    def regs(self) -> Dict[str, int]:
+        pass
+
+    @abstractmethod
+    def dump_physical_memory(self, addr: int, num_bytes: int) -> bytes:
+        pass
+
+    @abstractmethod
+    def attach(self) -> None:
+        pass
+
+    @abstractmethod
+    def send(self, cmd: str, args: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        pass
+
+    @abstractmethod
+    def pin_vcpu(self, pcpu_base: int = 0) -> None:
+        pass
+
+    @abstractmethod
+    def shutdown(self, timeout: int = 10) -> None:
+        pass
+
+    @abstractmethod
+    def create_file(self, path: str, content: str, mode: str = "w") -> None:
+        pass
+
+
+class QemuVm(Runner):
     def __init__(
         self,
         qmp_session: QmpSession,
@@ -303,7 +369,7 @@ class QemuVm:
                 print("Failed to pin vCPU{}: {}".format(cpuidx, e))
                 return
 
-    def shutdown(self, timeout=10) -> None:
+    def shutdown(self, timeout: int = 10) -> None:
         """Try graceful shutdown"""
         print("shutdown vm")
         try:
@@ -332,7 +398,7 @@ class QemuVm:
         self.ssh_cmd(cmd, input=content, check=True)
 
 
-class HostRunner:
+class HostRunner(Runner):
     """Execute commands on the host using the benchmarking dev environment.
 
     This class mimics the QemuVm interface but runs commands directly on the host
@@ -477,7 +543,7 @@ class HostRunner:
         """No-op for host runner"""
         print("Host runner: vCPU pinning not applicable")
 
-    def shutdown(self, timeout=10) -> None:
+    def shutdown(self, timeout: int = 10) -> None:
         """No-op for host runner"""
         print("Host runner: shutdown (no-op)")
 
@@ -525,7 +591,7 @@ def spawn_runner(
     config: Optional[dict] = None,
     pin: bool = False,
     shutdown: bool = True,
-) -> Iterator[Union[QemuVm, HostRunner]]:
+) -> Iterator[Runner]:
     """Spawn a host or VM runner and manage common runner lifecycle.
 
     When requested, vCPU pinning is applied before yielding the runner. By
@@ -651,9 +717,7 @@ def spawn_qemu(
             print("qemu stopped")
 
 
-def setup_hugepages(
-    vm: Union[QemuVm, HostRunner], total_size_gb: int = 4, page_size_gb: int = 1
-) -> None:
+def setup_hugepages(vm: Runner, total_size_gb: int = 4, page_size_gb: int = 1) -> None:
     """Setup hugepages inside the VM or on the host.
 
     Args:
