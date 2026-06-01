@@ -12,7 +12,7 @@
   disko.devices = {
     disk = {
       main = {
-        imageSize = "32G";
+        imageSize = "64G";
         device = "/dev/disk/by-id/some-disk-id";
         type = "disk";
         content = {
