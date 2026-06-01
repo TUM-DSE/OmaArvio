@@ -77,13 +77,21 @@ def bind_device_to_vfio(pci_addr: str) -> Optional[str]:
     return original_driver
 
 
-def unbind_device_from_vfio(pci_addr: str, original_driver: str) -> None:
+def unbind_device_from_vfio(pci_addr: str, original_driver: Optional[str]) -> None:
     """Unbind a PCIe device from vfio-pci and restore to original driver.
+
+    If original_driver is None (device had no driver before binding), the device
+    is unbound from vfio-pci but no driver restoration is attempted.
 
     Args:
         pci_addr: PCIe device address (e.g., "01:00.0")
-        original_driver: Driver name to restore (from bind_device_to_vfio() return value)
+        original_driver: Driver name to restore (from bind_device_to_vfio() return value),
+            or None if there was no original driver.
     """
+    if original_driver is None:
+        print(f"No original driver for {pci_addr}, skipping restore")
+        return
+
     driver_path = Path(f"/sys/bus/pci/devices/0000:{pci_addr}/driver")
 
     # Verify currently bound to vfio-pci
