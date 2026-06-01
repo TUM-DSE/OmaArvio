@@ -165,6 +165,9 @@ commands usually prepare configuration, select devices, and call
 ### VM Actions
 
 Use actions when code should run inside the unified VM/host benchmark path.
+Any execution job that runs workload commands, touches devices, or collects raw
+benchmark output should go through this path; keep only parsing and plotting as
+separate non-action tasks.
 Actions are registered with `@register_action` from `core.tasks.actions.registry`
 and are invoked through `inv vm.start --action run-<name>` or through a module
 task that calls `vm_start(...)`.
@@ -189,6 +192,11 @@ The action runner computes the output directory once from `path_fn` and passes i
 through `ActionContext`. Do not call `get_benchmark_output_path` inside actions;
 use `ctx.outputdir_host`, `ctx.outputdir_guest`, and `ctx.timestamp` so SAR,
 perf, VFIO traces, and benchmark outputs land together.
+Every file written by an action must include `ctx.timestamp` in the filename so
+repeated runs in the same output directory do not overwrite each other.
+
+See [actions.md](actions.md) for the full action registration, call flow, output
+path, and timestamp rules.
 
 For host-specific devices, construct `Devices` from `core.tasks.utils.device`
 instead of reading `config.toml` directly. `Devices(hostname=None)` resolves

@@ -97,6 +97,20 @@ Active modules: `nvme`, `fio`, `crypto`, `dpdk_spdk`, `nvidia_cc`, `nvbandwidth`
 
 The root `flake.nix` auto-discovers any `mod-*` input and wires it in: host packages, guest NixOS modules, Python tasks, and shared data (`/shared/modules/<name>/`).
 
+### Action Execution Rules
+
+Execution jobs must go through registered actions and `core.tasks.vm.start` with
+`action="run-<name>"`. Keep parsing and plotting as normal non-action tasks over
+existing result files.
+
+The action runner owns output path creation and the shared run timestamp. Action
+implementations should use `ctx.outputdir_host`, `ctx.outputdir_guest`, and
+`ctx.timestamp`; do not call `get_benchmark_output_path()` inside an action.
+Every file produced by a run must include `ctx.timestamp` in its filename.
+
+See [docs/actions.md](docs/actions.md) for the full registration, call-flow,
+output layout, and timestamp rules.
+
 ### `oma-arvio` CLI Assembly
 
 `core/nix/oma-arvio.nix` assembles:

@@ -37,3 +37,6 @@ Key sections:
 ## Adding a Benchmark Module
 
 See [docs/module-authoring.md](docs/module-authoring.md) for a full walkthrough on creating a new benchmark module.
+
+For the benchmark action lifecycle and result layout rules, see
+[docs/actions.md](docs/actions.md).
