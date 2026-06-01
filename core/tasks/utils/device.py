@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import re
 import socket
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from core.tasks.config import load_config
@@ -66,6 +68,13 @@ class Devices:
     @staticmethod
     def spdk_bdf(address: str) -> str:
         return Devices.full_bdf(address).replace(":", ".")
+
+    @property
+    def ctrl_id(self) -> int:
+        match = re.match(r"nvme(\d+)", Path(self.dev_path).resolve().name)
+        if not match:
+            raise RuntimeError(f"Cannot extract ctrl_id from '{self.dev_path}'")
+        return int(match.group(1))
 
     @property
     def nvme_short(self) -> str:
