@@ -239,6 +239,11 @@ class AmdMachineFeature(QemuFeature):
                 raise PermissionError(
                     "Cannot access /dev/sev. Likely need to run as root!"
                 )
+            sev_snp_param = Path("/sys/module/kvm_amd/parameters/sev_snp")
+            if not sev_snp_param.exists() or sev_snp_param.read_text().strip() != "Y":
+                raise RuntimeError(
+                    "SEV-SNP is likely not enabled on this host. Check dmesg for details."
+                )
             if self.attestation and self.hostname:
                 self.cert_bundle_path = ensure_snp_certificates(self.hostname)
 
