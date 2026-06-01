@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
+import json
+import socket
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +12,25 @@ from invoke import task
 
 import core.tasks.config as config
 from core.tasks.config import PROJECT_ROOT
+
+
+def _config_to_plain(value):
+    if is_dataclass(value):
+        return _config_to_plain(asdict(value))
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _config_to_plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_config_to_plain(item) for item in value]
+    return value
+
+
+def _print_config_section(title: str, value) -> None:
+    print(title)
+    print(json.dumps(_config_to_plain(value), indent=2))
 
 
 def parse_size_to_bytes(size: str | int | float) -> int:
@@ -67,6 +90,34 @@ def get_benchmark_output_path(
 @task
 def show_config(ctx):
     """Show script configuration"""
-    print(f"SCRIPT_ROOT: {config.SCRIPT_ROOT}")
-    print(f"PROJECT_ROOT: {config.PROJECT_ROOT}")
-    print(f"BUILD_DIR: {config.BUILD_DIR}")
+    cfg = config.load_config()
+    hostname = socket.gethostname()
+    host_config = cfg.hosts.get(hostname)
+
+    general_config = {
+        "project_root": config.PROJECT_ROOT,
+        "build_dir": config.BUILD_DIR,
+        "linux_dir": config.LINUX_DIR,
+        "current_hostname": hostname,
+        "ssh_port": cfg.ssh_port,
+        "vm_ip": cfg.vm_ip,
+        "valid_pcie_speeds": cfg.valid_pcie_speeds,
+        "qemu_devices": {
+            "nvme_pci": cfg.qemu_nvme_pci,
+            "nvme_dev_path": cfg.qemu_nvme_dev_path,
+        },
+        "vm_device_addresses": cfg.vm_device_addresses,
+        "output_root": cfg.output_root,
+        "default_vm_resources": cfg.default_vm_resources,
+    }
+
+    _print_config_section("General config", general_config)
+
+    if host_config is None:
+        known_hosts = ", ".join(sorted(cfg.hosts)) or "(none)"
+        print(f"\nHost config for {hostname!r}: not found")
+        print(f"Known hosts: {known_hosts}")
+        return
+
+    print()
+    _print_config_section(f"Host config for {hostname!r}", host_config)
