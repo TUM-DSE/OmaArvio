@@ -681,14 +681,38 @@ class VfioGroupLegacyFeature(QemuFeature):
             )
 
         tracing = ",x-no-mmap=true" if self.trace_file else ""
+
+        # All passthrough devices go behind ONE emulated PCIe switch so they
+        # share a common upstream bridge. Linux p2pdma only permits P2P DMA
+        # between endpoints under a shared switch, so this is what lets the
+        # NVMe DMA straight into the GPU BAR instead of bouncing through RAM.
+        #
+        #   pcie.0
+        #     └─ pcie-root-port (sw_rp)
+        #          └─ x3130-upstream (sw_up)
+        #               ├─ xio3130-downstream (sw_ds0) ─ vfio-pci dev0
+        #               └─ xio3130-downstream (sw_ds1) ─ vfio-pci dev1
+        args.extend(
+            [
+                "-device",
+                "pcie-root-port,id=sw_rp,bus=pcie.0,chassis=100,slot=0,multifunction=off",
+                "-device",
+                "x3130-upstream,id=sw_up,bus=sw_rp",
+            ]
+        )
+
         for idx, device in enumerate(self.pci_ids):
             vendor_id, device_id = get_pci_ids(device)
+            ds_id = f"sw_ds{idx}"
             args.extend(
                 [
                     "-device",
-                    f"pcie-root-port,id=rp_l{idx},bus=pcie.0,chassis={idx + 100},slot={idx},multifunction=off",
+                    f"xio3130-downstream,id={ds_id},bus=sw_up,"
+                    f"chassis={200 + idx},slot={idx}",
                     "-device",
-                    f"vfio-pci,host=0000:{device},x-pci-vendor-id={vendor_id},x-pci-device-id={device_id},bus=rp_l{idx}{tracing}",
+                    f"vfio-pci,host=0000:{device},"
+                    f"x-pci-vendor-id={vendor_id},x-pci-device-id={device_id},"
+                    f"bus={ds_id}{tracing}",
                 ]
             )
 
