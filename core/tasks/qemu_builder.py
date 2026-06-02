@@ -204,6 +204,13 @@ class CpuMemoryFeature(QemuFeature):
 
     def qemu_args(self) -> List[str]:
         prealloc_str = "on" if self.prealloc else "off"
+        # Bind guest memory to the specified host NUMA node(s) via the memory
+        # backend rather than numactl --membind, so the policy is attached to
+        # the memfd object itself and survives any process re-exec.
+        numa_opts = ""
+        if self.resource.numa_node:
+            nodes = ",".join(map(str, self.resource.numa_node))
+            numa_opts = f",host-nodes={nodes},policy=bind"
         return [
             "-enable-kvm",
             "-cpu",
@@ -213,7 +220,7 @@ class CpuMemoryFeature(QemuFeature):
             "-m",
             f"{self.resource.memory}G",
             "-object",
-            f"memory-backend-memfd,id=ram1,size={self.resource.memory}G,share=true,prealloc={prealloc_str}",
+            f"memory-backend-memfd,id=ram1,size={self.resource.memory}G,share=true,prealloc={prealloc_str}{numa_opts}",
         ]
 
 

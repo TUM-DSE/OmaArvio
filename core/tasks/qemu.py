@@ -648,11 +648,13 @@ def spawn_qemu(
         qmp_socket = Path(tempdir).joinpath("qmp.sock")
         cmd = extra_args_pre.copy()
 
+        # Bind QEMU process threads to the specified host NUMA node(s) so that
+        # vCPU and I/O threads run on local CPUs. Memory placement is handled
+        # separately via host-nodes/policy=bind on the memory-backend object.
         if numa_node is not None:
             cmd += [
                 "numactl",
                 f"--cpunodebind={','.join(map(str, numa_node))}",
-                f"--membind={','.join(map(str, numa_node))}",
             ]
 
         qmp_command = [
