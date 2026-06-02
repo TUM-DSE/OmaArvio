@@ -17,6 +17,7 @@ from typing import Iterator, List, Optional, Tuple, Dict, Any
 from core.tasks.config import PROJECT_ROOT, BUILD_DIR, LINUX_DIR
 from core.tasks.resources import VMResource
 from core.tasks.utils.utils import parse_size_to_bytes
+from core.tasks.utils.pci import short_bdf
 from core.tasks.utils.vfio import (
     get_pci_ids,
     bind_device_to_vfio,
@@ -542,7 +543,7 @@ class VfioGroupFeature(QemuFeature):
     """
 
     def __init__(self, pci_ids: List[str], trace_file: Optional[Path] = None):
-        self.pci_ids = pci_ids
+        self.pci_ids = [short_bdf(d) for d in pci_ids]
         self.trace_file = trace_file
         self.original_drivers: Dict[str, Optional[str]] = {}
 

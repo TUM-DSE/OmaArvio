@@ -108,7 +108,7 @@ def gts_to_gen(speed_gts: float) -> int:
     return speed_map.get(speed_gts, 0)
 
 
-def normalize_pci_address(address: str) -> str:
+def short_bdf(address: str) -> str:
     """Normalize PCI address to short BDF format.
 
     Args:
@@ -277,7 +277,7 @@ def get_pci_device(address: str) -> PCIDevice:
     Raises:
         RuntimeError: If device not found or parsing fails
     """
-    normalized = normalize_pci_address(address)
+    normalized = short_bdf(address)
     output = run_lspci(device=normalized, verbose=True)
     if not output.strip():
         raise RuntimeError(f"Device {address} not found")

@@ -1,5 +1,5 @@
 from core.tasks.procs import run
-from core.tasks.utils.pci import get_pci_device
+from core.tasks.utils.pci import get_pci_device, short_bdf
 
 
 from pathlib import Path
@@ -24,12 +24,13 @@ def bind_device_to_vfio(pci_addr: str) -> Optional[str]:
     """Bind a PCIe device to vfio-pci driver.
 
     Args:
-        pci_addr: PCIe device address (e.g., "01:00.0")
+        pci_addr: PCIe device address (e.g., "01:00.0" or "0000:01:00.0")
 
     Returns:
         The name of the original driver that was bound, or None if no driver was bound.
         Use this value with unbind_device_from_vfio() to restore the device.
     """
+    pci_addr = short_bdf(pci_addr)
     # Check if already bound to vfio-pci
     driver_path = Path(f"/sys/bus/pci/devices/0000:{pci_addr}/driver")
     original_driver = None
@@ -84,10 +85,11 @@ def unbind_device_from_vfio(pci_addr: str, original_driver: Optional[str]) -> No
     is unbound from vfio-pci but no driver restoration is attempted.
 
     Args:
-        pci_addr: PCIe device address (e.g., "01:00.0")
+        pci_addr: PCIe device address (e.g., "01:00.0" or "0000:01:00.0")
         original_driver: Driver name to restore (from bind_device_to_vfio() return value),
             or None if there was no original driver.
     """
+    pci_addr = short_bdf(pci_addr)
     if original_driver is None:
         print(f"No original driver for {pci_addr}, skipping restore")
         return
