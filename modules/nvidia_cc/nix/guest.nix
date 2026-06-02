@@ -4,7 +4,7 @@
 { pkgs, lib, config, ... }:
 
 {
-  boot.kernelParams = [ "iommu.strict=0" "iommu.passthrough=1" "pci=realloc" "pci=nocrs" "pci=assign-busses" ];
+  boot.kernelParams = [ "pci=realloc" "pci=nocrs" "pci=assign-busses" "iommu=off" ];
   # Blacklisted here as uvm loads them anyway
   boot.blacklistedKernelModules = [ "nvidia" "nvidia_drm" "nvidia_modeset" "nvidia_uvm" ];
 
