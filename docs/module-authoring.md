@@ -203,6 +203,9 @@ instead of reading `config.toml` directly. `Devices(hostname=None)` resolves
 the current host by default and exposes full and short PCI BDF forms. Storage
 benchmarks should call `devices.storage_target(setup, qemu_nvme=..., spdk=...)`
 to select host NVMe, passthrough NVMe, or QEMU-emulated NVMe consistently.
+Use the returned `pci_dev` for commands that run in the selected execution
+environment, and `host_pci_dev` for host-side checks such as PCIe link speed
+validation.
 
 ### Plotting Tasks
 

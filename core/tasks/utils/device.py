@@ -17,6 +17,7 @@ class StorageTarget:
     filename: str
     dev_path: str
     pci_dev: str
+    host_pci_dev: Optional[str]
     vfio_device: Optional[str]
     valid_pcie_speeds: Optional[list[int]]
 
@@ -117,6 +118,7 @@ class Devices:
                 filename=filename,
                 dev_path=self.qemu_nvme_dev_path,
                 pci_dev=self.qemu_nvme_pci,
+                host_pci_dev=None,
                 vfio_device=None,
                 valid_pcie_speeds=None,
             )
@@ -135,6 +137,7 @@ class Devices:
             filename=filename,
             dev_path=self.dev_path,
             pci_dev=pci,
+            host_pci_dev=self.nvme_pci,
             vfio_device=vfio_device,
             valid_pcie_speeds=self.valid_pcie_speeds,
         )

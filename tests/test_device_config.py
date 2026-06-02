@@ -34,9 +34,11 @@ class DeviceConfigTests(unittest.TestCase):
         qemu_nvme = devices.storage_target("amd", qemu_nvme=True)
 
         self.assertEqual(passthrough.pci_dev, "0000:01:00.0")
+        self.assertEqual(passthrough.host_pci_dev, devices.nvme_pci)
         self.assertEqual(passthrough.vfio_device, "43:00.0")
         self.assertEqual(passthrough.filename, "trtype=PCIe traddr=0000.01.00.0 ns=1")
         self.assertEqual(qemu_nvme.pci_dev, devices.qemu_nvme_pci)
+        self.assertIsNone(qemu_nvme.host_pci_dev)
         self.assertIsNone(qemu_nvme.vfio_device)
 
 

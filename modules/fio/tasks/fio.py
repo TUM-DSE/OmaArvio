@@ -82,9 +82,9 @@ def run_tests(
         try:
             speed_ctx = (
                 contextlib.nullcontext()
-                if qemu_nvme
+                if target.host_pci_dev is None
                 else check_speed(
-                    target.pci_dev,
+                    target.host_pci_dev,
                     verbose=True,
                     valid_speeds=target.valid_pcie_speeds,
                 )
