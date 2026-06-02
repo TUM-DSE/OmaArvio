@@ -289,5 +289,6 @@ def run_gdsio(
         sar_enabled=sar_enabled,
         name_extra=name_extra,
         vfio_pcie=vfio_devices,
+        vfio_pcie_legacy=setup == "amd",
         action_config=action_cfg,
     )
