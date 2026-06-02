@@ -16,7 +16,7 @@ from core.tasks.actions.runner import (
     run_benchmark_action,
 )
 from core.tasks.actions.registry import get_action
-from core.tasks.config import SSH_PORT, PROJECT_ROOT
+from core.tasks.config import SSH_PORT, PROJECT_ROOT, load_config
 from core.tasks.qemu import spawn_runner
 from core.tasks.qemu_builder import (
     get_vm_config,
@@ -105,6 +105,7 @@ def start(
     warn: bool = True,
     name_extra: str = "",
     vfio_pcie: Optional[List[str]] = None,
+    passthrough_host_devices: bool = False,
     edu: bool = False,
     vfio_trace: bool = False,
     vfio_trace_file: Optional[str] = None,
@@ -121,6 +122,20 @@ def start(
         ssh_cmd = []
     if vfio_pcie is None:
         vfio_pcie = []
+
+    #
+    if passthrough_host_devices:
+        host_cfg = load_config().hosts.get(hostname)
+        if host_cfg is None:
+            print(f"WARN: No host config for {hostname}, skipping device passthrough")
+        else:
+            devices = [
+                d
+                for d in [host_cfg.nvme_pci, host_cfg.gpu_pci]
+                if d and d not in vfio_pcie
+            ]
+            vfio_pcie.extend(devices)
+            print(f"Passthrough host devices: {devices}")
 
     config: dict = locals()
     resource = get_vm_resource(hostname, size)
