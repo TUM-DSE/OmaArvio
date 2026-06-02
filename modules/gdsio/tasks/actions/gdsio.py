@@ -3,8 +3,7 @@ from pathlib import Path
 from typing import Optional, List
 
 from core.tasks.actions import ActionContext
-from core.tasks.qemu import QemuVm, HostRunner
-from core.tasks.utils.utils import parse_size_to_mb
+from core.tasks.utils.utils import parse_size_to_bytes, parse_size_to_mb
 from core.tasks.actions.registry import register_action
 from modules.nvme.tasks.utils.storage import (
     format_plain_device,
@@ -13,38 +12,24 @@ from modules.nvme.tasks.utils.storage import (
 
 GDS_IMAGE = "gds-base"
 GDSIO_MOUNT = "/mnt/encrypted"
-
-
-def _gdsio_jobs_dir() -> Path:
-    return Path("/shared/modules/gdsio")
+GDSIO_JOBS_DIR = "/shared/modules/gdsio"
+PARTITION_HEADROOM = 1024  # in MB
 
 
 DEFAULT_XFER_TYPES = [0, 1, 2]
-
 XFER_TYPE_NAMES = {0: "gpu-direct", 1: "cpu-only", 2: "cpu-gpu"}
 
 
-def discover_gdsio_jobs() -> list:
-    """Return sorted list of *.gdsio job config files."""
-    return sorted(_gdsio_jobs_dir().glob("*.gdsio"))
+def discover_gdsio_jobs(vm) -> list:
+    """Return sorted list of *.gdsio job config files by querying the VM."""
+    result = vm.ssh_cmd(
+        ["sh", "-c", f"ls {GDSIO_JOBS_DIR}/*.gdsio 2>/dev/null | sort"],
+        check=False,
+    )
+    return [Path(p.strip()) for p in result.stdout.splitlines() if p.strip()]
 
 
-def _to_gdsio_size(file_size: str) -> str:
-    """Convert file_size string to gdsio-compatible K|M|G format.
-
-    Converts T to G since gdsio doesn't accept T suffix.
-    """
-    s = file_size.upper().strip()
-    if s.endswith("T"):
-        return f"{int(s[:-1]) * 1024}G"
-    return s
-
-
-def _gdsio_path(name: str, config: dict) -> tuple:
-    return ("gdsio", name)
-
-
-@register_action("gdsio", path_fn=_gdsio_path)
+@register_action("gdsio")
 def run_gdsio(
     ctx: ActionContext,
     dev_path: str = None,
@@ -83,7 +68,7 @@ def run_gdsio(
     date = ctx.timestamp
 
     file_size_mb = int(parse_size_to_mb(file_size))
-    partition_size = f"{int(file_size_mb * 1.1)}m"
+    partition_size = f"{int(file_size_mb + PARTITION_HEADROOM)}m"
     format_plain_device(
         vm,
         dev_path,
@@ -93,9 +78,7 @@ def run_gdsio(
         mount_options=["data=ordered"],
     )
 
-    gdsio_file_size = _to_gdsio_size(file_size)
-
-    jobs_host_path = str(_gdsio_jobs_dir())
+    gdsio_file_size = f"{parse_size_to_mb(file_size)}M"
 
     docker_flags = [
         "--rm",
@@ -107,11 +90,11 @@ def run_gdsio(
         "--ipc=host",
         "--env=CUFILE_USE_PCIP2PDMA=true",
         "--env=CUFILE_ALLOW_COMPAT_MODE=false",
-        f"--volume={jobs_host_path}:/jobs:ro",
+        f"--volume={GDSIO_JOBS_DIR}:/jobs:ro",
     ]
 
-    job_files = discover_gdsio_jobs()
-    print(f"gdsio jobs dir: {_gdsio_jobs_dir()} (exists={_gdsio_jobs_dir().exists()})")
+    job_files = discover_gdsio_jobs(vm)
+    print(f"gdsio jobs dir: {GDSIO_JOBS_DIR}")
     print(f"gdsio jobs found: {[j.name for j in job_files]}")
     print(f"Output dir (host): {outputdir_host}")
     print(f"Output dir (guest): {outputdir_guest}")
