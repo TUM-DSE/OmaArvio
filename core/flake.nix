@@ -81,8 +81,8 @@
         let
           nixosSystem = nixpkgs.lib.nixosSystem;
           applySnpPatches = import ./nix/apply-snp-patches.nix;
-          linux_6_17_snp = applySnpPatches pkgs.linux_6_17;
-          kernelPackages = pkgs.linuxPackagesFor linux_6_17_snp;
+          linux_snp = applySnpPatches pkgs.linux_latest;
+          kernelPackages = pkgs.linuxPackagesFor linux_snp;
           kernelConfig = { config, lib, pkgs, ... }: {
             boot.kernelPackages = kernelPackages;
           };
