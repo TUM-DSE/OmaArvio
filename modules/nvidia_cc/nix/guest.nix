@@ -4,6 +4,8 @@
 { pkgs, lib, config, ... }:
 
 {
+  boot.kernelParams = [ "iommu.strict=0" "iommu.passthrough=1" ];
+
   # Force static BAR1 (required for CC mode) + UVM / IOMMU workaround
   boot.extraModprobeConfig = lib.mkAfter ''
     options nvidia NVreg_RegistryDwords="RMForceStaticBar1=1;RmForceDisableIomapWC=1;"
