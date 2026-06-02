@@ -11,7 +11,7 @@ kernel.override {
         SEV_GUEST m
         X86_CPUID m
         VFIO_NOIOMMU y
-        DMA_API_DEBUG y
+        DMA_API_DEBUG n
         FS_VERITY y
       '';
     }
