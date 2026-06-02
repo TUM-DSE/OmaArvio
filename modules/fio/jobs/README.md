@@ -10,7 +10,7 @@ Based on: https://github.com/TUM-DSE/CVM_eval/tree/main/config/fio
 - `spdk_bandwidth.fio` - Standalone SPDK bandwidth write job (100G, not a symlink)
 - `misc/spdk-write.fio` - Standalone SPDK write reproducer
 
-Engine-specific parameters (`ioengine`, `direct`, `thread`, `cmd_type`) are **not** in the
+Engine-specific parameters (`ioengine`, `direct`, `thread`, `cmd_type`, `cuda_io`) are **not** in the
 `.fio` files. They are injected as CLI arguments by the Python benchmark runner
 (`tasks/actions/storage.py` via `ENGINE_CONFIGS` and `FioJobConfig`).
 
@@ -48,8 +48,12 @@ libaio-fsverity-ext4.fio             -> readonly.fio
 libaio-fsverity-ext4_bandwidth.fio   -> readonly_bandwidth.fio
 libaio-fsverity-f2fs.fio             -> readonly.fio
 libaio-fsverity-f2fs_bandwidth.fio   -> readonly_bandwidth.fio
+
+libcufilep2p-ext4.fio                -> readwrite.fio
+libcufilep2p-ext4_bandwidth.fio      -> readwrite_bandwidth.fio
+libcufileposix-ext4.fio              -> readwrite.fio
+libcufileposix-ext4_bandwidth.fio    -> readwrite_bandwidth.fio
 ```
 
 To add a new workload pattern, create a new `.fio` file with job definitions
 (no engine params) and add symlinks for each engine+storage combination.
-

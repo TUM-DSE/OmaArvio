@@ -56,10 +56,24 @@ ENGINE_CONFIGS = {
     "libaio": {"ioengine": "libaio", "direct": "1", "thread": "1"},
     "spdk": {"ioengine": "spdk", "direct": "1", "thread": "1"},
     "io_uring_cmd": {"ioengine": "io_uring_cmd", "cmd_type": "nvme"},
+    "libcufilep2p": {
+        "ioengine": "libcufile",
+        "cuda_io": "cufile",
+        "direct": "1",
+        "thread": "1",
+    },
+    "libcufileposix": {
+        "ioengine": "libcufile",
+        "cuda_io": "posix",
+        "direct": "1",
+        "thread": "1",
+    },
 }
 
-# Order matters: io_uring_cmd first because it contains '-' which would match libaio prefix
-KNOWN_ENGINES = ["io_uring_cmd", "libaio", "spdk"]
+# Order matters: longer/more specific engine prefixes must be checked first.
+KNOWN_ENGINES = ["io_uring_cmd", "libaio", "spdk", "libcufilep2p", "libcufileposix"]
+
+CUDA_ENGINES = {"libcufilep2p", "libcufileposix"}
 
 DEFAULT_FIO_JOB_DIRS = [Path("/shared/modules/fio")]
 
@@ -85,16 +99,23 @@ STORAGE_FORMATTERS = {
 }
 
 
+def mount_options_for_config(cfg: "FioJobConfig") -> list[str] | None:
+    if cfg.engine == "libcufilep2p" and cfg.filesystem == "ext4":
+        return ["data=ordered"]
+    return None
+
+
 @dataclass
 class FioJobConfig:
     """Parsed FIO job configuration — single source of truth for all job parameters.
 
-    Job names encode the engine prefix: "spdk", "libaio-ext4", "libaio-luks-ext4-aes", etc.
+    Job names encode the engine prefix: "spdk", "libaio-ext4", "libcufilep2p-ext4",
+    "libcufileposix-ext4", "libaio-luks-ext4-aes", etc.
     Use FioJobConfig.from_job_name() to parse a job name into all derived fields.
     """
 
     job: str  # Full job name (e.g., "libaio-ext4")
-    engine: str  # "libaio", "spdk", "io_uring_cmd"
+    engine: str  # "libaio", "spdk", "io_uring_cmd", "libcufilep2p", "libcufileposix"
     storage_type: str  # Full storage string: "raw", "ext4", "luks-ext4-aes", etc.
     storage_category: str  # Category: "raw", "plain", "luks", "dmverity", "fsverity"
     engine_args: dict  # CLI args for FIO engine
@@ -119,6 +140,8 @@ class FioJobConfig:
         Examples:
             "spdk"                       → engine=spdk, category=raw
             "libaio-ext4"                → engine=libaio, category=plain, fs=ext4
+            "libcufilep2p-ext4"          → engine=libcufilep2p, category=plain, fs=ext4
+            "libcufileposix-ext4_bandwidth" → engine=libcufileposix, category=plain, fs=ext4, suffix=bandwidth
             "libaio-luks-ext4-aes"       → engine=libaio, category=luks, fs=ext4, cipher=aes
             "libaio-dmverity-ext4"       → engine=libaio, category=dmverity, fs=ext4
             "libaio-ext4_bandwidth"      → engine=libaio, category=plain, fs=ext4, suffix=bandwidth
@@ -238,8 +261,12 @@ def run_fio(
         else:
             fio_target = filename
     else:
+        mount_options = mount_options_for_config(cfg)
+        formatter_kwargs = {}
+        if cfg.formatter_key == "plain" and mount_options:
+            formatter_kwargs["mount_options"] = mount_options
         fio_target = STORAGE_FORMATTERS[cfg.formatter_key](
-            vm, filename, cfg.filesystem, device_size
+            vm, filename, cfg.filesystem, device_size, **formatter_kwargs
         )
 
     if cfg.needs_precondition and not skip_precondition:
@@ -269,9 +296,9 @@ def run_fio(
         logs_dir_host = outputdir_host / f"{date}-logs"
         logs_dir_host.mkdir(parents=True, exist_ok=True)
 
-        # Build FIO command with spdk-fio for ALL jobs
+        fio_binary = "fio-cuda" if cfg.engine in CUDA_ENGINES else "spdk-fio"
         cmd = [
-            "spdk-fio",
+            fio_binary,
             f"--filename={fio_target}",
         ]
 
@@ -292,9 +319,16 @@ def run_fio(
             ]
         )
 
+        extra_env = {}
+        if cfg.engine in CUDA_ENGINES:
+            extra_env = {
+                "CUFILE_USE_PCIP2PDMA": "true",
+                "CUFILE_ALLOW_COMPAT_MODE": "false",
+            }
+
         readonly_str = " (read-only)" if cfg.readonly else ""
         print(f"Starting FIO{readonly_str} on {fio_target}")
-        vm.ssh_cmd(cmd, cwd=str(logs_dir_guest))
+        vm.ssh_cmd(cmd, cwd=str(logs_dir_guest), extra_env=extra_env)
     finally:
         print("Cleaning up after FIO run...")
         if cfg.needs_spdk_setup:

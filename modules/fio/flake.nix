@@ -25,6 +25,11 @@
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
+      pkgsCuda = import nixpkgs {
+        inherit system;
+        config.allowUnfree = true;
+        config.cudaSupport = true;
+      };
       # Use dpdk-spdk's custom fio if available, otherwise fall back to pkgs.fio
       customFio = dpdk-spdk.packages.${system}.fio or pkgs.fio;
     in
@@ -35,11 +40,13 @@
           mkdir -p $out
           cp -a ${./jobs}/. $out/
         '';
+
+        fio-cuda = import ./nix/fio-cuda.nix { inherit pkgsCuda; };
       };
 
       nixosModules.guest =
         import ./nix/guest.nix {
-          inherit (self.packages.${system}) fio-jobs;
+          inherit (self.packages.${system}) fio-jobs fio-cuda;
         };
 
       lib = {
@@ -47,6 +54,7 @@
           import ./nix/host.nix {
             inherit pkgs;
             fio = customFio;
+            fio-cuda = self.packages.${system}.fio-cuda;
             inherit (self.packages.${system}) fio-jobs;
           };
         sharedData = self.packages.${system}.fio-jobs;

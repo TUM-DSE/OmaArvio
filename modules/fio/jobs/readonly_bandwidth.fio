@@ -1,6 +1,6 @@
 [global]
 # These test are focused on the ban
-# Engine-specific params (ioengine, direct, thread, cmd_type) are
+# Engine-specific params (ioengine, direct, thread, cmd_type, cuda_io) are
 # passed via CLI by the benchmark runner (tasks/actions/storage.py).
 
 norandommap=1 # generate random offset for IO (independent of previous offsets)

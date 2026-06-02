@@ -59,6 +59,7 @@ def run_tests(
 
     results = []
     for job in job_list:
+        vfio_pcie = []
         cfg = FioJobConfig.from_job_name(job)
         target = devices.storage_target(
             setup,
@@ -69,6 +70,14 @@ def run_tests(
         bs_str = f" block_size={block_size}" if block_size else ""
         print(f"Running: {setup}-{size} job={job} filename={filename}{bs_str}")
         start_time = time.time()
+
+        # Handle NVMe passthrough
+        if target.vfio_device:
+            vfio_pcie.append(target.vfio_device)
+
+        # All the libcufile engines need to use a GPU
+        if cfg.engine.startswith("libcufile"):
+            vfio_pcie.append(devices.gpu_pci)
 
         try:
             speed_ctx = (
@@ -108,7 +117,7 @@ def run_tests(
                     vfio_trace=vfio_trace,
                     nvme=qemu_nvme,
                     nvme_size=nvme_size,
-                    vfio_pcie=[target.vfio_device] if target.vfio_device else [],
+                    vfio_pcie=vfio_pcie,
                     action_config=action_cfg,
                 )
 
