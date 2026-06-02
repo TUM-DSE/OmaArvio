@@ -189,7 +189,7 @@ def start(
         CpuMemoryFeature(
             resource,
             prealloc=boot_prealloc,
-            hugepages=vfio_pcie_legacy and bool(vfio_pcie),
+            hugepages=False,
         )
     )
     builder.add_feature(

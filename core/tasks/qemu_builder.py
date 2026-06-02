@@ -25,7 +25,10 @@ from core.tasks.utils.vfio import (
 )
 from core.tasks.qemu import spawn_qemu, QemuVm
 
-_HUGEPAGE_1G_PATH = Path("/sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages")
+_HUGEPAGE_1G_GLOBAL = Path("/sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages")
+_HUGEPAGE_1G_NODE = (
+    "/sys/devices/system/node/node{}/hugepages/hugepages-1048576kB/nr_hugepages"
+)
 
 
 @dataclass
@@ -207,28 +210,41 @@ class CpuMemoryFeature(QemuFeature):
         self.prealloc = prealloc
         self.hugepages = hugepages
 
+    def _hugepage_paths(self) -> List[Path]:
+        # When NUMA binding is active, allocate per-node so pages land on the
+        # correct node(s); QEMU's prealloc with policy=bind will otherwise fail
+        # with EFAULT if the global pool is distributed across the wrong nodes.
+        if self.resource.numa_node:
+            return [Path(_HUGEPAGE_1G_NODE.format(n)) for n in self.resource.numa_node]
+        return [_HUGEPAGE_1G_GLOBAL]
+
     def setup(self, builder: QemuVmBuilder) -> None:
         if not self.hugepages:
             return
-        required = self.resource.memory  # 1 GB pages per GB
-        self._prev_hugepages = int(_HUGEPAGE_1G_PATH.read_text().strip())
-        if self._prev_hugepages < required:
-            _HUGEPAGE_1G_PATH.write_text(str(required))
-            actual = int(_HUGEPAGE_1G_PATH.read_text().strip())
-            if actual < required:
-                raise RuntimeError(
-                    f"Could only allocate {actual} of {required} 1 GB hugepages on the host"
-                )
+        paths = self._hugepage_paths()
+        required_per_path = self.resource.memory // len(paths)
+        self._prev_hugepages: Dict[Path, int] = {}
+        for path in paths:
+            prev = int(path.read_text().strip())
+            self._prev_hugepages[path] = prev
+            if prev < required_per_path:
+                path.write_text(str(required_per_path))
+                actual = int(path.read_text().strip())
+                if actual < required_per_path:
+                    raise RuntimeError(
+                        f"Could only allocate {actual} of {required_per_path} 1 GB hugepages at {path}"
+                    )
 
     def teardown(self, builder: QemuVmBuilder) -> None:
         if not self.hugepages or not hasattr(self, "_prev_hugepages"):
             return
-        try:
-            _HUGEPAGE_1G_PATH.write_text(str(self._prev_hugepages))
-        except Exception as exc:
-            print(
-                f"Warning: failed to restore nr_hugepages to {self._prev_hugepages}: {exc}"
-            )
+        for path, prev in self._prev_hugepages.items():
+            try:
+                path.write_text(str(prev))
+            except Exception as exc:
+                print(
+                    f"Warning: failed to restore nr_hugepages to {prev} at {path}: {exc}"
+                )
 
     def qemu_args(self) -> List[str]:
         prealloc_str = "on" if self.prealloc else "off"
