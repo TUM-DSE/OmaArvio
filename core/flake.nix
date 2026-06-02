@@ -27,7 +27,7 @@
         qemu-amd = pkgs-2505.callPackage ./nix/qemu-amd.nix { pkgs = pkgs; };
         qemu-upstream = pkgs.callPackage ./nix/qemu-upstream.nix { pkgs = pkgs; };
         ovmf-amd-sev-snp = pkgs.callPackage ./nix/ovmf-amd-sev-snp.nix { pkgs = pkgs-2505; };
-        ovmf-upstream = pkgs.callPackage ./nix/ovmf-upstream.nix { pkgs = pkgs; };
+        ovmf-upstream = pkgs.OVMF.fd;
       };
 
       # NixOS module: base guest config (networking, SSH, /share, basic tools)
