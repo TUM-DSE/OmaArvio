@@ -578,7 +578,7 @@ class VfioGroupFeature(QemuFeature):
             args.extend(
                 [
                     "-device",
-                    f"pcie-root-port,id=rp{idx},bus=pcie.0,chassis=0,slot={idx},multifunction=off,pref64-reserve=274877906944B,mem-reserve=4194304B",
+                    f"pcie-root-port,id=rp{idx},bus=pcie.0,chassis=0,slot={idx},multifunction=off",
                     "-device",
                     f"vfio-pci,host=0000:{device},x-pci-vendor-id={vendor_id},x-pci-device-id={device_id},bus=rp{idx},iommufd=iommufd0{tracing}",
                 ]

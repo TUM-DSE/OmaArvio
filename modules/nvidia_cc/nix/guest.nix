@@ -4,12 +4,13 @@
 { pkgs, lib, config, ... }:
 
 {
-  boot.kernelParams = [ "iommu.strict=0" "iommu.passthrough=1" ];
+  boot.kernelParams = [ "iommu.strict=0" "iommu.passthrough=1" "pci=realloc" "pci=nocrs" "pci=assign-busses" ];
+  # Blacklisted here as uvm loads them anyway
+  boot.blacklistedKernelModules = [ "nvidia" "nvidia_drm" "nvidia_modeset" "nvidia_uvm" ];
 
   # Force static BAR1 (required for CC mode) + UVM / IOMMU workaround
   boot.extraModprobeConfig = lib.mkAfter ''
     options nvidia NVreg_RegistryDwords="RMForceStaticBar1=1;RmForceDisableIomapWC=1;"
-    install nvidia ${pkgs.kmod}/bin/modprobe ecdsa_generic; ${pkgs.kmod}/bin/modprobe ecdh; ${pkgs.kmod}/bin/modprobe --ignore-install nvidia
   '';
 
   hardware.graphics.enable = true;
