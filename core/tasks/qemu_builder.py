@@ -25,6 +25,8 @@ from core.tasks.utils.vfio import (
 )
 from core.tasks.qemu import spawn_qemu, QemuVm
 
+_HUGEPAGE_1G_PATH = Path("/sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages")
+
 
 @dataclass
 class VMConfig:
@@ -198,12 +200,41 @@ class QemuFeature(ABC):
 class CpuMemoryFeature(QemuFeature):
     """Configures the CPU architecture, core count, and memory allocation."""
 
-    def __init__(self, resource: VMResource, prealloc: bool = True):
+    def __init__(
+        self, resource: VMResource, prealloc: bool = True, hugepages: bool = False
+    ):
         self.resource = resource
         self.prealloc = prealloc
+        self.hugepages = hugepages
+
+    def setup(self, builder: QemuVmBuilder) -> None:
+        if not self.hugepages:
+            return
+        required = self.resource.memory  # 1 GB pages per GB
+        self._prev_hugepages = int(_HUGEPAGE_1G_PATH.read_text().strip())
+        if self._prev_hugepages < required:
+            _HUGEPAGE_1G_PATH.write_text(str(required))
+            actual = int(_HUGEPAGE_1G_PATH.read_text().strip())
+            if actual < required:
+                raise RuntimeError(
+                    f"Could only allocate {actual} of {required} 1 GB hugepages on the host"
+                )
+
+    def teardown(self, builder: QemuVmBuilder) -> None:
+        if not self.hugepages or not hasattr(self, "_prev_hugepages"):
+            return
+        try:
+            _HUGEPAGE_1G_PATH.write_text(str(self._prev_hugepages))
+        except Exception as exc:
+            print(
+                f"Warning: failed to restore nr_hugepages to {self._prev_hugepages}: {exc}"
+            )
 
     def qemu_args(self) -> List[str]:
         prealloc_str = "on" if self.prealloc else "off"
+        # Legacy VFIO requires hugepages: 4K pages exhaust the iommu_type1 DMA
+        # mapping limit (65535) for any reasonable memory size.
+        hugepage_opts = ",hugetlb=on,hugetlbsize=1073741824" if self.hugepages else ""
         # Bind guest memory to the specified host NUMA node(s) via the memory
         # backend rather than numactl --membind, so the policy is attached to
         # the memfd object itself and survives any process re-exec.
@@ -220,7 +251,7 @@ class CpuMemoryFeature(QemuFeature):
             "-m",
             f"{self.resource.memory}G",
             "-object",
-            f"memory-backend-memfd,id=ram1,size={self.resource.memory}G,share=true,prealloc={prealloc_str}{numa_opts}",
+            f"memory-backend-memfd,id=ram1,size={self.resource.memory}G,share=true,prealloc={prealloc_str}{hugepage_opts}{numa_opts}",
         ]
 
 
@@ -588,6 +619,60 @@ class VfioGroupFeature(QemuFeature):
                     f"pcie-root-port,id=rp{idx},bus=pcie.0,chassis=0,slot={idx},multifunction=off",
                     "-device",
                     f"vfio-pci,host=0000:{device},x-pci-vendor-id={vendor_id},x-pci-device-id={device_id},bus=rp{idx},iommufd=iommufd0{tracing}",
+                ]
+            )
+
+        return args
+
+
+class VfioGroupLegacyFeature(QemuFeature):
+    """
+    Passthroughs host PCI devices via the legacy VFIO container API (no iommufd).
+
+    Omits -object iommufd and iommufd= on each vfio-pci device so QEMU uses
+    /dev/vfio/<group>, placing all devices in a shared IOMMU domain.
+    This is required for P2P DMA between passed-through devices inside the VM.
+    """
+
+    def __init__(self, pci_ids: List[str], trace_file: Optional[Path] = None):
+        self.pci_ids = [short_bdf(d) for d in pci_ids]
+        self.trace_file = trace_file
+        self.original_drivers: Dict[str, Optional[str]] = {}
+
+    def setup(self, builder: QemuVmBuilder) -> None:
+        for device in self.pci_ids:
+            self.original_drivers[device] = bind_device_to_vfio(device)
+
+    def teardown(self, builder: QemuVmBuilder) -> None:
+        for device in reversed(self.pci_ids):
+            if device in self.original_drivers:
+                try:
+                    unbind_device_from_vfio(device, self.original_drivers[device])
+                except Exception as exc:
+                    print(f"Warning: Failed to restore {device}: {exc}")
+
+    def qemu_args(self) -> List[str]:
+        if not self.pci_ids:
+            return []
+
+        args = []
+        if self.trace_file:
+            args.extend(
+                [
+                    "-trace",
+                    f"enable=vfio_region_write,enable=vfio_region_read,file={self.trace_file}",
+                ]
+            )
+
+        tracing = ",x-no-mmap=true" if self.trace_file else ""
+        for idx, device in enumerate(self.pci_ids):
+            vendor_id, device_id = get_pci_ids(device)
+            args.extend(
+                [
+                    "-device",
+                    f"pcie-root-port,id=rp_l{idx},bus=pcie.0,chassis={idx + 100},slot={idx},multifunction=off",
+                    "-device",
+                    f"vfio-pci,host=0000:{device},x-pci-vendor-id={vendor_id},x-pci-device-id={device_id},bus=rp_l{idx}{tracing}",
                 ]
             )
 

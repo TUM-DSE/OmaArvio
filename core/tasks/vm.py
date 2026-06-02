@@ -32,6 +32,7 @@ from core.tasks.qemu_builder import (
     VirtioNicFeature,
     NvmeEmulationFeature,
     VfioGroupFeature,
+    VfioGroupLegacyFeature,
     EduFeature,
     ExtraCmdFeature,
 )
@@ -105,6 +106,7 @@ def start(
     warn: bool = True,
     name_extra: str = "",
     vfio_pcie: Optional[List[str]] = None,
+    vfio_pcie_legacy: bool = False,
     passthrough_host_devices: bool = False,
     edu: bool = False,
     vfio_trace: bool = False,
@@ -122,6 +124,8 @@ def start(
         ssh_cmd = []
     if vfio_pcie is None:
         vfio_pcie = []
+    elif isinstance(vfio_pcie, str):
+        vfio_pcie = [d.strip() for d in vfio_pcie.split(",") if d.strip()]
 
     #
     if passthrough_host_devices:
@@ -149,6 +153,12 @@ def start(
     if type not in supported_types:
         raise ValueError(f"Type needs to be one of: {supported_types}")
 
+    if vfio_pcie_legacy and type == "snp":
+        raise ValueError(
+            "Legacy VFIO (--vfio-pcie-legacy) is not compatible with SEV-SNP. "
+            "Use --type amd instead."
+        )
+
     if attestation:
         if type != "snp":
             raise ValueError("Attestation requires SNP mode (--type snp)")
@@ -175,7 +185,13 @@ def start(
 
     builder = QemuVmBuilder(vmconfig.qemu, resource)
 
-    builder.add_feature(CpuMemoryFeature(resource, prealloc=boot_prealloc))
+    builder.add_feature(
+        CpuMemoryFeature(
+            resource,
+            prealloc=boot_prealloc,
+            hugepages=vfio_pcie_legacy and bool(vfio_pcie),
+        )
+    )
     builder.add_feature(
         AmdMachineFeature(
             confidential=(type == "snp"), hostname=hostname, attestation=attestation
@@ -243,8 +259,9 @@ def start(
         trace_file = (
             Path(config["vfio_trace_file"]) if config.get("vfio_trace_file") else None
         )
+        feature_cls = VfioGroupLegacyFeature if vfio_pcie_legacy else VfioGroupFeature
         builder.add_feature(
-            VfioGroupFeature(
+            feature_cls(
                 pci_ids=vfio_pcie,
                 trace_file=trace_file,
             )
