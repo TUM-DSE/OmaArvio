@@ -191,7 +191,7 @@ def system_run(
 
     module_shared_data = os.environ.get("MODULE_SHARED_DATA")
     if module_shared_data:
-        systemd_cmd.append(f"--property=BindPaths={module_shared_data}:/shared:ro")
+        systemd_cmd.append(f"--property=BindReadOnlyPaths={module_shared_data}:/shared")
 
     # Add Nix environment variables via --setenv
     for var_name, var_value in nix_env.items():
