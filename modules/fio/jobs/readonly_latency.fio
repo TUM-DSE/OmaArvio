@@ -1,0 +1,26 @@
+[global]
+# These tests are focused on read access latency (iodepth=1, numjobs=1).
+# Engine-specific params (ioengine, direct, thread, cmd_type, cuda_io) are
+# passed via CLI by the benchmark runner (tasks/actions/storage.py).
+
+norandommap=1 # generate random offset for IO (independent of previous offsets)
+randrepeat=0 # RNG for generating offset is seeded in random manner
+
+time_based=1
+runtime=30
+ramp_time=20
+group_reporting=1
+
+[alat randread]
+stonewall
+blocksize=4k
+rw=randread
+iodepth=1
+numjobs=1
+
+[alat read]
+stonewall
+blocksize=4k
+rw=read
+iodepth=1
+numjobs=1
