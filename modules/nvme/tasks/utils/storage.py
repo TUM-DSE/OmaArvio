@@ -54,6 +54,7 @@ def create_test_file(
             "status=progress",
         ],
         check=True,
+        bypass=True,
     )
 
 
