@@ -61,7 +61,7 @@ large  = { cpu = 32, memory = 256, numa_node = [0], pin_base = 0 }
 numa   = { cpu = 64, memory = 512, numa_node = [0, 1], pin_base = 0 }
 
 [hosts.polly]
-nvme_pci = "0000:91:00.0"
+nvme_pci = "0000:12:00.0"
 dev_path = "/dev/disk/by-id/nvme-KIOXIA_KCMYXRUG3T84_4FB0A0CT0LM3_1"
 valid_pcie_speeds = [4, 5]
 gpu_pci = "0000:01:00.0"
