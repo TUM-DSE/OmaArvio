@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 from pathlib import Path
 from typing import Optional, List
 
@@ -80,6 +81,14 @@ def run_gdsio(
 
     gdsio_file_size = f"{parse_size_to_mb(file_size)}M"
 
+    # TODO: bind mount of /shared/modules/gdsio doesn't work on the host runner
+    # because the path does not get correctly rebind to the container.
+    # Find a proper solution for exposing shared module data on the host runner.
+    if is_host:
+        jobs_src = f"{os.getenv("MODULE_SHARED_DATA")}/modules/gdsio"
+    else:
+        jobs_src = GDSIO_JOBS_DIR
+
     docker_flags = [
         "--rm",
         "--privileged",
@@ -90,7 +99,7 @@ def run_gdsio(
         "--ipc=host",
         "--env=CUFILE_USE_PCIP2PDMA=true",
         "--env=CUFILE_ALLOW_COMPAT_MODE=false",
-        f"--volume={GDSIO_JOBS_DIR}:/jobs:ro",
+        f"--mount=type=bind,source={jobs_src},target=/jobs,readonly",
     ]
 
     job_files = discover_gdsio_jobs(vm)
@@ -116,7 +125,7 @@ def run_gdsio(
             cmd = ["docker", "run"] + docker_flags + [GDS_IMAGE, "sh", "-c", inner_cmd]
 
             print(f"Running gdsio {job_name} (xfer={xfer_name})")
-            vm.ssh_cmd(cmd, check=True, bypass=True)
+            vm.ssh_cmd(cmd, check=True)
 
             dest = str(copy_dest_dir / f"{date}-{job_name}-xfer{xfer_type}.txt")
             vm.ssh_cmd(["cp", result_path, dest], check=True, bypass=True)
