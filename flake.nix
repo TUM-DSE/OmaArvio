@@ -90,6 +90,7 @@
         config.allowUnfree = true;
         cudaSupport = true;
         config.cudaVersion = "13";
+        overlays = [ core.overlays.qemu-qmp ];
       };
 
       pre-commit-check = pre-commit-hooks.lib.${system}.run {

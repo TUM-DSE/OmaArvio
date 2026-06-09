@@ -1,5 +1,5 @@
 { pkgs }:
-
+# Currently unused as we can use NixOS package without any modifications
 with pkgs;
 (qemu_full.override {
   guestAgentSupport = false;

@@ -16,6 +16,7 @@
       pkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
+        overlays = [ self.overlays.qemu-qmp ];
       };
       pkgs-2505 = import nixpkgs-2505 {
         inherit system;
@@ -23,9 +24,17 @@
       };
     in
     {
+      overlays.qemu-qmp = _final: prev: {
+        python3 = prev.python3.override {
+          packageOverrides = pyFinal: _pyPrev: {
+            qemu = pyFinal.callPackage ./nix/python-qemu-qmp.nix { };
+          };
+        };
+      };
+
       packages.${system} = {
-        qemu-amd = pkgs-2505.callPackage ./nix/qemu-amd.nix { pkgs = pkgs; };
-        qemu-upstream = pkgs.callPackage ./nix/qemu-upstream.nix { pkgs = pkgs; };
+        qemu-amd = pkgs-2505.callPackage ./nix/qemu-amd.nix { pkgs = pkgs-2505; };
+        qemu-upstream = pkgs.qemu_full;
         ovmf-amd-sev-snp = pkgs.callPackage ./nix/ovmf-amd-sev-snp.nix { pkgs = pkgs-2505; };
         ovmf-upstream = pkgs.OVMF.fd;
       };
