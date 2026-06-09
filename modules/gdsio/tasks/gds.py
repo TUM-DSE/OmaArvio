@@ -11,6 +11,7 @@ from invoke import task
 from core.tasks import vm as vm_tasks
 from core.tasks.utils.iommu import iommu_label
 from core.tasks.utils.device import Devices
+from core.tasks.utils.pci import check_speed
 
 _METRIC_FILE_RE = re.compile(
     r"^(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})-(.+)-xfer(\d)\.txt$"
@@ -279,16 +280,21 @@ def run_gdsio(
         vfio_devices.append(devices.gpu_short)
         print(f"GPU passthrough enabled: {gpu_pci}")
 
-    vm_tasks.start(
-        ctx,
-        type=setup,
-        size=size,
-        hostname=hostname,
-        direct=False,
-        action="run-gdsio",
-        sar_enabled=sar_enabled,
-        name_extra=name_extra,
-        vfio_pcie=vfio_devices,
-        vfio_pcie_legacy=setup == "amd",
-        action_config=action_cfg,
-    )
+    with check_speed(
+        devices.nvme_pci,
+        verbose=True,
+        valid_speeds=devices.valid_pcie_speeds,
+    ):
+        vm_tasks.start(
+            ctx,
+            type=setup,
+            size=size,
+            hostname=hostname,
+            direct=False,
+            action="run-gdsio",
+            sar_enabled=sar_enabled,
+            name_extra=name_extra,
+            vfio_pcie=vfio_devices,
+            vfio_pcie_legacy=setup == "amd",
+            action_config=action_cfg,
+        )
