@@ -775,16 +775,21 @@ class VfioGroupLegacyFeature(QemuFeature):
         # share a common upstream bridge. Linux p2pdma only permits P2P DMA
         # between endpoints under a shared switch, so this is what lets the
         # NVMe DMA straight into the GPU BAR instead of bouncing through RAM.
+        # pxb-pcie pins the entire hierarchy to NUMA node 0 so the guest ACPI
+        # SRAT table reflects the correct memory affinity for direct DMA.
         #
         #   pcie.0
-        #     └─ pcie-root-port (sw_rp)
-        #          └─ x3130-upstream (sw_up)
-        #               ├─ xio3130-downstream (sw_ds0) ─ vfio-pci dev0
-        #               └─ xio3130-downstream (sw_ds1) ─ vfio-pci dev1
+        #     └─ pxb-pcie (pxb0, numa_node=0)
+        #          └─ pcie-root-port (sw_rp)
+        #               └─ x3130-upstream (sw_up)
+        #                    ├─ xio3130-downstream (sw_ds0) ─ vfio-pci dev0
+        #                    └─ xio3130-downstream (sw_ds1) ─ vfio-pci dev1
         args.extend(
             [
                 "-device",
-                "pcie-root-port,id=sw_rp,bus=pcie.0,chassis=100,slot=0,multifunction=off",
+                "pxb-pcie,id=pxb0,bus_nr=64,numa_node=0",
+                "-device",
+                "pcie-root-port,id=sw_rp,bus=pxb0,chassis=100,slot=0,multifunction=off",
                 "-device",
                 "x3130-upstream,id=sw_up,bus=sw_rp",
             ]
