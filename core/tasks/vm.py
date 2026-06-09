@@ -22,7 +22,9 @@ from core.tasks.qemu_builder import (
     get_vm_config,
     QemuVmBuilder,
     QemuFeature,
-    CpuMemoryFeature,
+    CpuFeature,
+    FlatMemoryFeature,
+    GuestNumaFeature,
     AmdMachineFeature,
     BootFeature,
     UserNetFeature,
@@ -185,18 +187,27 @@ def start(
 
     builder = QemuVmBuilder(vmconfig.qemu, resource)
 
-    builder.add_feature(
-        CpuMemoryFeature(
-            resource,
-            prealloc=boot_prealloc,
-            hugepages=False,
+    builder.add_feature(CpuFeature(resource))
+
+    if resource.numa_node:
+        builder.add_feature(GuestNumaFeature(resource, prealloc=boot_prealloc))
+        builder.add_feature(
+            AmdMachineFeature(
+                confidential=(type == "snp"),
+                hostname=hostname,
+                attestation=attestation,
+            )
         )
-    )
-    builder.add_feature(
-        AmdMachineFeature(
-            confidential=(type == "snp"), hostname=hostname, attestation=attestation
+    else:
+        builder.add_feature(FlatMemoryFeature(resource, prealloc=boot_prealloc))
+        builder.add_feature(
+            AmdMachineFeature(
+                confidential=(type == "snp"),
+                hostname=hostname,
+                attestation=attestation,
+                memory_backend="ram1",
+            )
         )
-    )
 
     builder.add_feature(
         BootFeature(vmconfig=vmconfig, direct=direct, extra_cmdline=extra_cmdline)

@@ -200,8 +200,26 @@ class QemuFeature(ABC):
         return []
 
 
-class CpuMemoryFeature(QemuFeature):
-    """Configures the CPU architecture, core count, and memory allocation."""
+class CpuFeature(QemuFeature):
+    """Configures the CPU architecture, core count, and total memory size."""
+
+    def __init__(self, resource: VMResource):
+        self.resource = resource
+
+    def qemu_args(self) -> List[str]:
+        return [
+            "-enable-kvm",
+            "-cpu",
+            "EPYC-Genoa-v1,host-phys-bits=true",
+            "-smp",
+            str(self.resource.cpu),
+            "-m",
+            f"{self.resource.memory}G",
+        ]
+
+
+class FlatMemoryFeature(QemuFeature):
+    """Single memory backend for VMs without guest NUMA topology."""
 
     def __init__(
         self, resource: VMResource, prealloc: bool = True, hugepages: bool = False
@@ -251,24 +269,90 @@ class CpuMemoryFeature(QemuFeature):
         # Legacy VFIO requires hugepages: 4K pages exhaust the iommu_type1 DMA
         # mapping limit (65535) for any reasonable memory size.
         hugepage_opts = ",hugetlb=on,hugetlbsize=1073741824" if self.hugepages else ""
-        # Bind guest memory to the specified host NUMA node(s) via the memory
-        # backend rather than numactl --membind, so the policy is attached to
-        # the memfd object itself and survives any process re-exec.
         numa_opts = ""
         if self.resource.numa_node:
             nodes = ",".join(map(str, self.resource.numa_node))
             numa_opts = f",host-nodes={nodes},policy=bind"
         return [
-            "-enable-kvm",
-            "-cpu",
-            "EPYC-Genoa-v1,host-phys-bits=true",
-            "-smp",
-            str(self.resource.cpu),
-            "-m",
-            f"{self.resource.memory}G",
             "-object",
             f"memory-backend-memfd,id=ram1,size={self.resource.memory}G,share=true,prealloc={prealloc_str}{hugepage_opts}{numa_opts}",
         ]
+
+
+class GuestNumaFeature(QemuFeature):
+    """
+    Guest NUMA topology: per-cell memory backends with strict host-node binding
+    and corresponding -numa node assignments.
+
+    Equivalent to libvirt's <numatune> (strict per-cell binding) combined with
+    <cpu><numa> (cell id/cpus/memory layout). CPUs and memory are split evenly
+    across the host NUMA nodes listed in resource.numa_node.
+    """
+
+    def __init__(
+        self, resource: VMResource, prealloc: bool = True, hugepages: bool = False
+    ):
+        if not resource.numa_node:
+            raise ValueError("GuestNumaFeature requires at least one NUMA node")
+        self.resource = resource
+        self.prealloc = prealloc
+        self.hugepages = hugepages
+
+    def setup(self, builder: QemuVmBuilder) -> None:
+        if not self.hugepages:
+            return
+        n = len(self.resource.numa_node)
+        mem_per_cell = self.resource.memory // n
+        self._prev_hugepages: Dict[Path, int] = {}
+        for host_node in self.resource.numa_node:
+            path = Path(_HUGEPAGE_1G_NODE.format(host_node))
+            prev = int(path.read_text().strip())
+            self._prev_hugepages[path] = prev
+            if prev < mem_per_cell:
+                path.write_text(str(mem_per_cell))
+                actual = int(path.read_text().strip())
+                if actual < mem_per_cell:
+                    raise RuntimeError(
+                        f"Could only allocate {actual} of {mem_per_cell} 1 GB hugepages at {path}"
+                    )
+
+    def teardown(self, builder: QemuVmBuilder) -> None:
+        if not self.hugepages or not hasattr(self, "_prev_hugepages"):
+            return
+        for path, prev in self._prev_hugepages.items():
+            try:
+                path.write_text(str(prev))
+            except Exception as exc:
+                print(
+                    f"Warning: failed to restore nr_hugepages to {prev} at {path}: {exc}"
+                )
+
+    def qemu_args(self) -> List[str]:
+        n = len(self.resource.numa_node)
+        cpus_per_cell = self.resource.cpu // n
+        mem_per_cell = self.resource.memory // n
+        prealloc_str = "on" if self.prealloc else "off"
+        hugepage_opts = ",hugetlb=on,hugetlbsize=1073741824" if self.hugepages else ""
+
+        args = []
+        for i, host_node in enumerate(self.resource.numa_node):
+            args.extend(
+                [
+                    "-object",
+                    f"memory-backend-memfd,id=numa_ram{i},size={mem_per_cell}G,share=true"
+                    f",prealloc={prealloc_str}{hugepage_opts},host-nodes={host_node},policy=bind",
+                ]
+            )
+        for i in range(n):
+            cpu_start = i * cpus_per_cell
+            cpu_end = (i + 1) * cpus_per_cell - 1
+            args.extend(
+                [
+                    "-numa",
+                    f"node,nodeid={i},cpus={cpu_start}-{cpu_end},memdev=numa_ram{i}",
+                ]
+            )
+        return args
 
 
 class AmdMachineFeature(QemuFeature):
@@ -282,10 +366,12 @@ class AmdMachineFeature(QemuFeature):
         confidential: bool = False,
         hostname: Optional[str] = None,
         attestation: bool = False,
+        memory_backend: Optional[str] = None,
     ):
         self.confidential = confidential
         self.hostname = hostname
         self.attestation = attestation
+        self.memory_backend = memory_backend
         self.cert_bundle_path: Optional[Path] = None
 
     def setup(self, builder: QemuVmBuilder) -> None:
@@ -303,10 +389,13 @@ class AmdMachineFeature(QemuFeature):
                 self.cert_bundle_path = ensure_snp_certificates(self.hostname)
 
     def qemu_args(self) -> List[str]:
+        mem_backend = (
+            f",memory-backend={self.memory_backend}" if self.memory_backend else ""
+        )
         if self.confidential:
             machine_arg = [
                 "-machine",
-                "q35,memory-backend=ram1,memory-encryption=sev0,vmport=off,kernel_irqchip=split",
+                f"q35{mem_backend},memory-encryption=sev0,vmport=off,kernel_irqchip=split",
             ]
             sev_guest_config = "id=sev0,cbitpos=51,reduced-phys-bits=1,policy=0x30000"
             if self.attestation and self.cert_bundle_path:
@@ -315,7 +404,7 @@ class AmdMachineFeature(QemuFeature):
         else:
             return [
                 "-machine",
-                "q35,memory-backend=ram1,vmport=off,kernel_irqchip=split",
+                f"q35{mem_backend},vmport=off,kernel_irqchip=split",
             ]
 
 
