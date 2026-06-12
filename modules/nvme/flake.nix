@@ -24,6 +24,8 @@
       customFio = dpdk-spdk.packages.${system}.fio or pkgs.fio;
     in
     {
+      nixosModules.guest = import ./nix/guest.nix { };
+
       lib = {
         hostPackages = pkgs: import ./nix/host.nix { inherit pkgs; fio = customFio; };
       } // core.lib.mkModulePythonLib { name = "nvme"; inherit self; };

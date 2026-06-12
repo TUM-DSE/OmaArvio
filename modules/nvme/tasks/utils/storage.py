@@ -3,10 +3,17 @@
 
 from __future__ import annotations
 
+import shlex
 import time
 
 from core.tasks.qemu import HostRunner, QemuVm
 from core.tasks.utils.utils import parse_size_to_mb
+
+# Fixed key/IV: content only needs to be high-entropy/non-compressible, not
+# secret or unique per run - using a fixed key/IV makes the generated test
+# file deterministic across runs. Values are arbitrary random bytes, not secrets.
+_FILL_KEY = "b5032473a56388a75d264d8de756700df200fad4e280e686ac37128f516c3c86"
+_FILL_IV = "42c311bbb9f75add783b29c1374e6daf"
 
 
 def parse_job_filesystem(job_name: str) -> str:
@@ -43,19 +50,13 @@ def create_test_file(
 ) -> None:
     if size_mb is None:
         size_mb = 9216
-    print(f"Creating test file with random data ({size_mb}MB)...")
-    vm.ssh_cmd(
-        [
-            "dd",
-            "if=/dev/urandom",
-            f"of={mount_point}/{filename}",
-            "bs=1M",
-            f"count={size_mb}",
-            "status=progress",
-        ],
-        check=True,
-        bypass=True,
+    print(f"Creating test file with pseudo-random data ({size_mb}MB)...")
+    target = shlex.quote(f"{mount_point}/{filename}")
+    cmd = (
+        f"openssl enc -aes-256-ctr -K {_FILL_KEY} -iv {_FILL_IV} -nosalt -in /dev/zero 2>/dev/null | "
+        f"dd of={target} bs=1M count={size_mb} iflag=fullblock status=progress"
     )
+    vm.ssh_cmd(["sh", "-c", cmd], check=True, bypass=True)
 
 
 def get_partition_name(device: str, partition_num: int) -> str:
