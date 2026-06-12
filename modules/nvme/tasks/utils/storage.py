@@ -83,10 +83,14 @@ def create_test_file(
     cmd = (
         f"truncate -s {size_mb}M {target} && "
         f"printf '%s\\n' {job_args} | "
-        f"rust-parallel -s --shell-path sh -j {n}"
+        f"rust-parallel -s --shell-path sh -j {n} && "
+        f"sync -f {target}"
     )
+    start = time.monotonic()
     vm.ssh_cmd(["sh", "-c", cmd], check=True, bypass=True)
-    print("Test file created.")
+    elapsed = time.monotonic() - start
+    throughput_mb_s = size_mb / elapsed if elapsed > 0 else float("inf")
+    print(f"Test file created in {elapsed:.2f}s ({throughput_mb_s:.1f} MB/s).")
 
 
 def get_partition_name(device: str, partition_num: int) -> str:
