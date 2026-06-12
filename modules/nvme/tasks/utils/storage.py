@@ -15,6 +15,11 @@ from core.tasks.utils.utils import parse_size_to_mb
 _FILL_KEY = "b5032473a56388a75d264d8de756700df200fad4e280e686ac37128f516c3c86"
 _FILL_IV = "42c311bbb9f75add783b29c1374e6daf"
 
+# Cap on parallel openssl|dd workers for create_test_file(). AES-256-CTR via
+# AES-NI tops out around ~2GB/s on a single core, so splitting across cores
+# is needed to keep up with NVMe write speeds.
+_MAX_PARALLEL = 8
+
 
 def parse_job_filesystem(job_name: str) -> str:
     for fs_type in ["ext4", "f2fs"]:
@@ -52,11 +57,36 @@ def create_test_file(
         size_mb = 9216
     print(f"Creating test file with pseudo-random data ({size_mb}MB)...")
     target = shlex.quote(f"{mount_point}/{filename}")
+
+    nproc_result = vm.ssh_cmd(["nproc"], check=True, bypass=True)
+    n = max(1, min(int(nproc_result.stdout.strip()), _MAX_PARALLEL, size_mb))
+
+    # AES-CTR keystream at byte offset `off` only depends on IV + off/16
+    # (16-byte blocks), so each chunk can continue the single-stream
+    # keystream independently - the concatenated output is byte-identical
+    # to a single openssl process covering the whole file.
+    iv_int = int(_FILL_IV, 16)
+    base, rem = divmod(size_mb, n)
+    jobs = []
+    off_mb = 0
+    for i in range(n):
+        chunk_mb = base + (1 if i < rem else 0)
+        block_off = (off_mb * 1024 * 1024) // 16
+        chunk_iv = format((iv_int + block_off) % (2**128), "032x")
+        jobs.append(
+            f"openssl enc -aes-256-ctr -K {_FILL_KEY} -iv {chunk_iv} -nosalt -in /dev/zero 2>/dev/null | "
+            f"dd of={target} bs=1M count={chunk_mb} seek={off_mb} conv=notrunc iflag=fullblock status=none"
+        )
+        off_mb += chunk_mb
+
+    job_args = " ".join(shlex.quote(job) for job in jobs)
     cmd = (
-        f"openssl enc -aes-256-ctr -K {_FILL_KEY} -iv {_FILL_IV} -nosalt -in /dev/zero 2>/dev/null | "
-        f"dd of={target} bs=1M count={size_mb} iflag=fullblock status=progress"
+        f"truncate -s {size_mb}M {target} && "
+        f"printf '%s\\n' {job_args} | "
+        f"rust-parallel -s --shell-path sh -j {n}"
     )
     vm.ssh_cmd(["sh", "-c", cmd], check=True, bypass=True)
+    print("Test file created.")
 
 
 def get_partition_name(device: str, partition_num: int) -> str:
