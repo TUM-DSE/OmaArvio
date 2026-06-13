@@ -14,7 +14,6 @@ from modules.nvme.tasks.utils.storage import (
 GDS_IMAGE = "gds-base"
 GDSIO_MOUNT = "/mnt/encrypted"
 GDSIO_JOBS_DIR = "/shared/modules/gdsio"
-PARTITION_HEADROOM = 1024  # in MB
 
 
 DEFAULT_XFER_TYPES = [0, 1, 2]
@@ -68,8 +67,9 @@ def run_gdsio(
     outputdir_guest = ctx.outputdir_guest
     date = ctx.timestamp
 
+    # Partition is 10% larger than the testfile to accommodate filesystem overhead.
     file_size_mb = int(parse_size_to_mb(file_size))
-    partition_size = f"{int(file_size_mb + PARTITION_HEADROOM)}m"
+    partition_size = f"{int(file_size_mb * 1.1)}m"
     format_plain_device(
         vm,
         dev_path,
