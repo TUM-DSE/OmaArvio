@@ -285,18 +285,18 @@ class QemuVm(Runner):
         """
         if extra_env is None:
             extra_env = {}
-        env_cmd = []
-        if len(extra_env):
-            env_cmd.append("env")
-            # "-" option makes phoronix-test-suite to complain about mktemp and sh not found
-            # TODO: check if this is correct way to handle this
-            # env_cmd.append("-")
-            for k, v in extra_env.items():
-                env_cmd.append(f"{k}={v}")
         remote_cmd = " ".join(map(quote, argv))
+        if extra_env:
+            # The `env` prefix must stay inside the single remote command string and
+            # after any `cd`, otherwise the remote shell sees `env VAR=val cd ...` and
+            # env tries to exec the `cd` builtin ("env: 'cd': No such file or directory").
+            env_prefix = " ".join(
+                ["env"] + [f"{k}={quote(v)}" for k, v in extra_env.items()]
+            )
+            remote_cmd = f"{env_prefix} {remote_cmd}"
         if cwd:
             remote_cmd = f"cd {quote(cwd)} && {remote_cmd}"
-        cmd = ssh_cmd(self.ssh_port) + ["--"] + env_cmd + [remote_cmd]
+        cmd = ssh_cmd(self.ssh_port) + ["--", remote_cmd]
         return run(
             cmd,
             stdin=stdin,
