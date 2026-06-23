@@ -29,6 +29,15 @@ def monitor_with_sar(
     host_sar_file = output_dir / f"{timestamp}_host_sar.txt"
     host_sar_proc = None
 
+    # Persist the pinned physical-CPU set (vCPU + iothread cores) so analysis can
+    # scope CPU utilization to exactly the cores this run uses. Only present for
+    # pinned VM runs; host runs leave it absent (whole-machine accounting).
+    pinned_cpus = getattr(vm, "pinned_cpus", None)
+    if pinned_cpus:
+        (output_dir / f"{timestamp}_pinned_cpus.txt").write_text(
+            ",".join(str(c) for c in pinned_cpus)
+        )
+
     try:
         print(f"Starting host sar monitoring -> {host_sar_file}")
         host_sar_proc = subprocess.Popen(

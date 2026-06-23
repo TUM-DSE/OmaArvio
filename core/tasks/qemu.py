@@ -340,15 +340,23 @@ class QemuVm(Runner):
         return self.qmp_session.send(cmd, args or {})
 
     def pin_vcpu(self, pcpu_base: int = 0) -> None:
-        """Pin vCPUs to physical CPUs"""
+        """Pin vCPUs to physical CPUs.
+
+        Records the set of physical CPUs the VM is pinned to (vCPU threads plus
+        iothreads) in ``self.pinned_cpus`` so monitoring can scope CPU
+        utilization to exactly the cores this run uses.
+        """
         cpu_info = self.send("query-cpus-fast")["return"]
         num_cpus = len(cpu_info)
+        self.pinned_cpus: List[int] = []
         for cpu in cpu_info:
             tid = cpu["thread-id"]
             cpuidx = cpu["cpu-index"]
             try:
-                cmd = ["taskset", "-pc", str(cpuidx + pcpu_base), str(tid)]
+                target = cpuidx + pcpu_base
+                cmd = ["taskset", "-pc", str(target), str(tid)]
                 run(cmd)
+                self.pinned_cpus.append(target)
             except subprocess.CalledProcessError as e:
                 print("Failed to pin vCPU{}: {}".format(cpuidx, e))
                 return
@@ -362,8 +370,10 @@ class QemuVm(Runner):
         for i, cpu in enumerate(iothreads_info):
             tid = cpu["thread-id"]
             try:
-                cmd = ["taskset", "-pc", str(pcpu_base + num_cpus + i), str(tid)]
+                target = pcpu_base + num_cpus + i
+                cmd = ["taskset", "-pc", str(target), str(tid)]
                 run(cmd)
+                self.pinned_cpus.append(target)
             except subprocess.CalledProcessError as e:
                 # FIXME: this can happen if pcpu_base + num_cpus + i is bigger than the number of available CPUs
                 print("Failed to pin vCPU{}: {}".format(cpuidx, e))
