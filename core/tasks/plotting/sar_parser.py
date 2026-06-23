@@ -32,6 +32,10 @@ class SARData:
     mem_buffers_kb: List[float] = field(default_factory=list)
     mem_cached_kb: List[float] = field(default_factory=list)
 
+    # Per-core idle%, keyed by CPU index, aligned to abs_timestamps. Only
+    # populated when sar was run with `-P ALL`; empty otherwise.
+    per_cpu_idle: Dict[int, List[float]] = field(default_factory=dict)
+
 
 def parse_timestamp(time_str: str, date_str: str = None) -> datetime:
     """Parse SAR timestamp format (e.g., '02:08:01 PM') to datetime.
@@ -89,7 +93,7 @@ def parse_sar_file(filepath: Path) -> SARData:
             i += 1
             continue
 
-        # Parse CPU line (format: "02:08:02 PM     all      0.00 ...")
+        # Parse the aggregate CPU line (format: "02:08:02 PM     all      0.00 ...")
         if "all" in line:
             parts = line.split()
             if len(parts) >= 8:
@@ -126,6 +130,26 @@ def parse_sar_file(filepath: Path) -> SARData:
                     data.cpu_idle.append(float(parts[8]))
                 except (ValueError, IndexError):
                     pass
+
+        # Parse a per-core CPU line (only present with `-P ALL`):
+        # "02:08:02 PM       0      0.00 ...". The CPU id sits in parts[2] and
+        # the line has the same 9-token shape as the aggregate line. Align it to
+        # the most recent aggregate sample index.
+        elif (
+            len(line.split()) == 9 and line.split()[2].isdigit() and data.abs_timestamps
+        ):
+            parts = line.split()
+            try:
+                cpu_idx = int(parts[2])
+                idle = float(parts[8])
+                sample_idx = len(data.abs_timestamps) - 1
+                idle_list = data.per_cpu_idle.setdefault(cpu_idx, [])
+                # Pad to align with the current aggregate sample index.
+                while len(idle_list) < sample_idx:
+                    idle_list.append(float("nan"))
+                idle_list.append(idle)
+            except (ValueError, IndexError):
+                pass
 
         # Parse memory line
         elif "kbmemfree" not in line and len(line.split()) >= 11:
@@ -181,6 +205,65 @@ def get_window_average(
         "cpu_used_pct": sum(cpu_samples) / len(cpu_samples),
         "mem_used_kb": sum(mem_samples) / len(mem_samples) if mem_samples else 0.0,
         "sample_count": len(cpu_samples),
+    }
+
+
+def get_window_cores_used(
+    sar_data: SARData,
+    start_unix_ms: int,
+    end_unix_ms: int,
+    cpus: Optional[List[int]] = None,
+) -> Optional[dict]:
+    """Effective cores used over a unix-ms window, scoped to a CPU set.
+
+    Effective cores = mean over in-window samples of Σ_{c in cpus} busy_c/100,
+    where busy_c = 100 - idle_c. Requires per-core data (sar run with `-P ALL`).
+
+    Args:
+        sar_data: Parsed SAR data with per_cpu_idle populated.
+        start_unix_ms: Window start in unix milliseconds.
+        end_unix_ms: Window end in unix milliseconds.
+        cpus: CPU indices to aggregate (e.g. the pinned vCPU/iothread range).
+            When None, all observed cores are used.
+
+    Returns:
+        {"cores_used": float, "sample_count": int} or None if no per-core
+        samples fall in the window.
+    """
+    if not sar_data.per_cpu_idle:
+        return None
+
+    selected = (
+        [c for c in cpus if c in sar_data.per_cpu_idle]
+        if cpus is not None
+        else list(sar_data.per_cpu_idle)
+    )
+    if not selected:
+        return None
+
+    per_sample_cores = []
+    for i, abs_ts in enumerate(sar_data.abs_timestamps):
+        ts_ms = int(abs_ts.timestamp() * 1000)
+        if not (start_unix_ms <= ts_ms <= end_unix_ms):
+            continue
+        total = 0.0
+        counted = False
+        for c in selected:
+            idle_list = sar_data.per_cpu_idle[c]
+            if i < len(idle_list):
+                idle = idle_list[i]
+                if idle == idle:  # skip NaN padding
+                    total += (100.0 - idle) / 100.0
+                    counted = True
+        if counted:
+            per_sample_cores.append(total)
+
+    if not per_sample_cores:
+        return None
+
+    return {
+        "cores_used": sum(per_sample_cores) / len(per_sample_cores),
+        "sample_count": len(per_sample_cores),
     }
 
 
