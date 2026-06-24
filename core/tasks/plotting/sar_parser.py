@@ -5,6 +5,7 @@ Pure parsing module for SAR output files. Extracted from plot_sar.py to allow
 reuse in bandwidth reporting and other analysis pipelines.
 """
 
+import calendar
 import re
 from pathlib import Path
 from datetime import datetime, date, timedelta
@@ -191,7 +192,7 @@ def get_window_average(
     mem_samples = []
 
     for i, abs_ts in enumerate(sar_data.abs_timestamps):
-        ts_ms = int(abs_ts.timestamp() * 1000)
+        ts_ms = int(calendar.timegm(abs_ts.timetuple()) * 1000)
         if start_unix_ms <= ts_ms <= end_unix_ms:
             cpu_used = 100.0 - sar_data.cpu_idle[i]
             cpu_samples.append(cpu_used)
@@ -243,7 +244,7 @@ def get_window_cores_used(
 
     per_sample_cores = []
     for i, abs_ts in enumerate(sar_data.abs_timestamps):
-        ts_ms = int(abs_ts.timestamp() * 1000)
+        ts_ms = int(calendar.timegm(abs_ts.timetuple()) * 1000)
         if not (start_unix_ms <= ts_ms <= end_unix_ms):
             continue
         total = 0.0
