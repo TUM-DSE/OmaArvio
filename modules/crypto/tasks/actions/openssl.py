@@ -64,6 +64,8 @@ def parse_openssl_speed_output(output: str, algorithm: str, block_size: int) -> 
         "algorithm": algorithm,
         "block_size": block_size,
         "throughput_bytes_per_sec": throughput,
+        # GiB/s; the "gb_per_sec" key name is historical and kept so archived
+        # result files keep parsing.
         "throughput_gb_per_sec": round(throughput / (1024**3), 2),
         "raw_output": output,
     }

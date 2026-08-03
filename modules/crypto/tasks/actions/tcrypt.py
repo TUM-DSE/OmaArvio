@@ -79,7 +79,8 @@ def parse_tcrypt_hash_output(dmesg_output: str, mode: int) -> dict:
             opers_per_sec = int(test_match.group(5))
             bytes_per_sec = int(test_match.group(6))
 
-            # Calculate throughput in MB/s
+            # Calculate throughput in MiB/s; the "mbps" key name is historical
+            # and kept so archived result files keep parsing.
             throughput_mbps = bytes_per_sec / (1024 * 1024)
 
             test_result = {
@@ -156,7 +157,8 @@ def parse_tcrypt_dmesg_output(dmesg_output: str, mode: int) -> dict:
             duration = int(test_match.group(5))
             total_bytes = int(test_match.group(6))
 
-            # Calculate throughput
+            # Calculate throughput in MiB/s; the "mbps" key name is historical
+            # and kept so archived result files keep parsing.
             throughput_bytes_per_sec = total_bytes / duration if duration > 0 else 0
             throughput_mbps = throughput_bytes_per_sec / (1024 * 1024)
 

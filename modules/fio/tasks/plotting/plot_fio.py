@@ -16,6 +16,10 @@ from . import fio_parser
 from .fio_parser import FIOData
 
 
+# FIO reports bandwidth in KiB/s; the bandwidth plots are labelled GiB/s.
+KIB_PER_GIB = 1024 * 1024
+
+
 @dataclass
 class TraceInfo:
     """Information about a trace for the checkbox selector."""
@@ -521,10 +525,10 @@ def create_bandwidth_figure(
             text_vals = []
 
             if bw_read_job in job_data:
-                read_bw = job_data[bw_read_job].read_bw_mean / 1_000_000
-                read_min = job_data[bw_read_job].read_bw_min / 1_000_000
-                read_max = job_data[bw_read_job].read_bw_max / 1_000_000
-                read_stddev = job_data[bw_read_job].read_bw_stddev / 1_000_000
+                read_bw = job_data[bw_read_job].read_bw_mean / KIB_PER_GIB
+                read_min = job_data[bw_read_job].read_bw_min / KIB_PER_GIB
+                read_max = job_data[bw_read_job].read_bw_max / KIB_PER_GIB
+                read_stddev = job_data[bw_read_job].read_bw_stddev / KIB_PER_GIB
                 x_vals.append("Read")
                 y_vals.append(read_bw)
                 all_y_values.append(read_bw)
@@ -533,10 +537,10 @@ def create_bandwidth_figure(
                 )
 
             if bw_write_job in job_data:
-                write_bw = job_data[bw_write_job].write_bw_mean / 1_000_000
-                write_min = job_data[bw_write_job].write_bw_min / 1_000_000
-                write_max = job_data[bw_write_job].write_bw_max / 1_000_000
-                write_stddev = job_data[bw_write_job].write_bw_stddev / 1_000_000
+                write_bw = job_data[bw_write_job].write_bw_mean / KIB_PER_GIB
+                write_min = job_data[bw_write_job].write_bw_min / KIB_PER_GIB
+                write_max = job_data[bw_write_job].write_bw_max / KIB_PER_GIB
+                write_stddev = job_data[bw_write_job].write_bw_stddev / KIB_PER_GIB
                 x_vals.append("Write")
                 y_vals.append(write_bw)
                 all_y_values.append(write_bw)
@@ -917,15 +921,15 @@ def create_figures_with_history(
             if job_key in job_data:
                 data = job_data[job_key]
                 if rw_type == "read":
-                    bw = data.read_bw_mean / 1_000_000
-                    bw_min = data.read_bw_min / 1_000_000
-                    bw_max = data.read_bw_max / 1_000_000
-                    bw_stddev = data.read_bw_stddev / 1_000_000
+                    bw = data.read_bw_mean / KIB_PER_GIB
+                    bw_min = data.read_bw_min / KIB_PER_GIB
+                    bw_max = data.read_bw_max / KIB_PER_GIB
+                    bw_stddev = data.read_bw_stddev / KIB_PER_GIB
                 else:
-                    bw = data.write_bw_mean / 1_000_000
-                    bw_min = data.write_bw_min / 1_000_000
-                    bw_max = data.write_bw_max / 1_000_000
-                    bw_stddev = data.write_bw_stddev / 1_000_000
+                    bw = data.write_bw_mean / KIB_PER_GIB
+                    bw_min = data.write_bw_min / KIB_PER_GIB
+                    bw_max = data.write_bw_max / KIB_PER_GIB
+                    bw_stddev = data.write_bw_stddev / KIB_PER_GIB
                 x_vals.append(x_label)
                 y_vals.append(bw)
                 all_bw_y.append(bw)

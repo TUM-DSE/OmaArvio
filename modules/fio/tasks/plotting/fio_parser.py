@@ -28,7 +28,7 @@ class FIOData:
     """Parsed FIO benchmark metrics for a single job."""
 
     jobname: str
-    # Read metrics - bandwidth
+    # Read metrics - bandwidth (in KiB/s, as reported by FIO)
     read_bw_mean: float
     read_bw_stddev: float
     read_bw_min: float
@@ -43,7 +43,7 @@ class FIOData:
     read_lat_stddev: float
     read_lat_min: float
     read_lat_max: float
-    # Write metrics - bandwidth
+    # Write metrics - bandwidth (in KiB/s, as reported by FIO)
     write_bw_mean: float
     write_bw_stddev: float
     write_bw_min: float
@@ -142,7 +142,7 @@ def parse_fio_file(filepath: Path) -> Dict[str, FIOData]:
 
         fio_data = FIOData(
             jobname=jobname,
-            # Read bandwidth metrics
+            # Read bandwidth metrics (FIO reports these in KiB/s)
             read_bw_mean=float(job["read"]["bw_mean"]),
             read_bw_stddev=float(job["read"]["bw_dev"]),
             read_bw_min=float(job["read"]["bw_min"]),
@@ -157,7 +157,7 @@ def parse_fio_file(filepath: Path) -> Dict[str, FIOData]:
             read_lat_stddev=float(job["read"]["lat_ns"]["stddev"]),
             read_lat_min=float(job["read"]["lat_ns"]["min"]),
             read_lat_max=float(job["read"]["lat_ns"]["max"]),
-            # Write bandwidth metrics
+            # Write bandwidth metrics (FIO reports these in KiB/s)
             write_bw_mean=float(job["write"]["bw_mean"]),
             write_bw_stddev=float(job["write"]["bw_dev"]),
             write_bw_min=float(job["write"]["bw_min"]),

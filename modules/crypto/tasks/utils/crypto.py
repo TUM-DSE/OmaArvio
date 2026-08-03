@@ -97,7 +97,7 @@ def parse_openssl_results(json_path: Path, algorithms: List[str]) -> Dict[str, f
         algorithms: List of algorithm names to extract
 
     Returns:
-        Dict mapping algorithm name to throughput in GB/s
+        Dict mapping algorithm name to throughput in GiB/s
     """
     if not json_path or not json_path.exists():
         return {}
@@ -109,7 +109,7 @@ def parse_openssl_results(json_path: Path, algorithms: List[str]) -> Dict[str, f
     for result in data.get("results", []):
         algo = result.get("algorithm")
         if algo in algorithms and result.get("block_size") == 4096:
-            # OpenSSL already provides throughput in GB/s
+            # The OpenSSL results already carry throughput in GiB/s
             results[algo] = result.get("throughput_gb_per_sec", 0.0)
 
     return results
@@ -125,7 +125,7 @@ def parse_tcrypt_results(
         algorithm_specs: List of algorithm specs from ALGORITHMS config
 
     Returns:
-        Dict mapping tcrypt algorithm name to throughput in GB/s
+        Dict mapping tcrypt algorithm name to throughput in GiB/s
     """
     if not json_path or not json_path.exists():
         return {}
