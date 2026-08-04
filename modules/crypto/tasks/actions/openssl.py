@@ -106,13 +106,8 @@ def run_openssl_speed(
 
     # Run each algorithm
     for alg_entry in algorithms:
-        # Build command with CPU pinning.
-        #
-        # openssl-aegis, not openssl: the AEGIS algorithms below only exist in
-        # our fork, and the bare name resolves to whichever OpenSSL sorts first
-        # in the environment -- usually a stock one, which fails those three
-        # with "unknown cipher or digest". Every environment that has this
-        # action also installs the fork, which ships this name for us alone.
+        # openssl-aegis, not openssl: the bare name may resolve to a stock
+        # build, which has no AEGIS EVP algorithms.
         cmd = [
             "taskset",
             "-c",
@@ -138,9 +133,7 @@ def run_openssl_speed(
             failed[alg_entry] = str(e)
             # Continue with other algorithms
 
-    # Build output data. A failed algorithm is otherwise indistinguishable from
-    # one that was never requested -- both are simply absent from "results" --
-    # so name them here: a run that lost rows still looks complete downstream.
+    # Name the failures: absent from "results" alone reads as never requested.
     output_data = {
         "results": all_results,
         "_metadata": {
