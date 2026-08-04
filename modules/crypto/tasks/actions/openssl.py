@@ -102,15 +102,22 @@ def run_openssl_speed(
         algorithms = DEFAULT_ALGORITHMS
 
     all_results = []
+    failed = {}
 
     # Run each algorithm
     for alg_entry in algorithms:
-        # Build command with CPU pinning
+        # Build command with CPU pinning.
+        #
+        # openssl-aegis, not openssl: the AEGIS algorithms below only exist in
+        # our fork, and the bare name resolves to whichever OpenSSL sorts first
+        # in the environment -- usually a stock one, which fails those three
+        # with "unknown cipher or digest". Every environment that has this
+        # action also installs the fork, which ships this name for us alone.
         cmd = [
             "taskset",
             "-c",
             str(cpu_pin),
-            "openssl",
+            "openssl-aegis",
             "speed",
             "-mr",
             "-elapsed",
@@ -128,15 +135,19 @@ def run_openssl_speed(
             all_results.append(parsed)
         except Exception as e:
             print(f"    Warning: Failed to run {alg_entry}: {e}")
+            failed[alg_entry] = str(e)
             # Continue with other algorithms
 
-    # Build output data
+    # Build output data. A failed algorithm is otherwise indistinguishable from
+    # one that was never requested -- both are simply absent from "results" --
+    # so name them here: a run that lost rows still looks complete downstream.
     output_data = {
         "results": all_results,
         "_metadata": {
             "name": ctx.name,
             "timestamp": date,
             "algorithms": algorithms,
+            "failed_algorithms": failed,
             "block_size": block_size,
             "cpu_pin": cpu_pin,
         },
