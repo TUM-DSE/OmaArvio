@@ -28,7 +28,8 @@ let
       "-Dwerror=false"
     ] ++ lib.optionals minimal [
       # Minimal DPDK build for SPDK
-      "-Denable_drivers=bus/pci,bus/vdev,bus/auxiliary,mempool/ring,mempool/bucket,crypto/aesni_mb,crypto/qat,compress/qat,common/qat,crypto/ipsec_mb,crypto/mlx5,common/mlx5"
+      "-Denable_drivers=bus/pci,bus/vdev,bus/auxiliary,mempool/ring,mempool/bucket,crypto/aesni_mb,crypto/qat,compress/qat,common/qat,crypto/ipsec_mb"
+      "-Ddisable_drivers=crypto/mlx5,common/mlx5"
       "-Denable_libs=eal,pci,malloc,memzone,mempool,ring,kvargs,version,cryptodev,mbuf,compressdev,vhost,dmadev,security,argparse"
     ];
   });
