@@ -20,6 +20,13 @@ _FILL_IV = "42c311bbb9f75add783b29c1374e6daf"
 # is needed to keep up with NVMe write speeds.
 _MAX_PARALLEL = 8
 
+# The partition nodes a caller derives from get_partition_name() are created
+# by udev after the kernel's partition rescan, so they are not there when
+# parted or partprobe returns. On a device whose namespace was just formatted
+# udev has a queue to work through first, and whatever runs next - mkfs,
+# cryptsetup - then fails with a bare "does not exist".
+_DEVICE_WAIT_S = 30
+
 
 def parse_job_filesystem(job_name: str) -> str:
     for fs_type in ["ext4", "f2fs"]:
@@ -101,6 +108,37 @@ def get_partition_name(device: str, partition_num: int) -> str:
     return f"{device}{partition_num}"
 
 
+def wait_for_block_devices(
+    vm: QemuVm | HostRunner,
+    paths: list[str],
+    timeout_s: int = _DEVICE_WAIT_S,
+) -> None:
+    """Block until every path is a block device, or fail naming the missing ones.
+
+    Waits in the guest rather than here: one round trip covers the whole
+    wait, and udevadm settle blocks on udev's queue instead of polling it.
+    """
+    quoted = " ".join(shlex.quote(path) for path in paths)
+    script = f"""
+set -u
+deadline=$(($(date +%s) + {timeout_s}))
+while :; do
+    missing=''
+    for p in {quoted}; do
+        [ -b "$p" ] || missing="$missing $p"
+    done
+    [ -z "$missing" ] && exit 0
+    [ "$(date +%s)" -ge "$deadline" ] && break
+    udevadm settle --timeout=5 >/dev/null 2>&1 || true
+    sleep 0.2
+done
+echo "block devices missing after {timeout_s}s:$missing" >&2
+lsblk -o NAME,SIZE,TYPE >&2 || true
+exit 1
+"""
+    vm.ssh_cmd(["sh", "-c", script], check=True, bypass=True)
+
+
 def create_partition(
     vm: QemuVm | HostRunner, device: str, partitions: list[tuple[str, str]]
 ) -> None:
@@ -109,8 +147,13 @@ def create_partition(
         parted_cmd.extend(["mkpart", "primary", start, end])
 
     vm.ssh_cmd(parted_cmd, check=True, bypass=True)
+    # Advisory: the kernel also rescans when parted closes the device, and
+    # partprobe reports another device's failure as its own. The wait below
+    # is what gates the caller.
     vm.ssh_cmd(["partprobe", device], check=False, bypass=True)
-    time.sleep(0.5)
+    wait_for_block_devices(
+        vm, [get_partition_name(device, n) for n in range(1, len(partitions) + 1)]
+    )
 
 
 def format_luks_device_with_mode(
