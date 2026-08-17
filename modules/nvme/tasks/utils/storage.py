@@ -26,6 +26,11 @@ _MAX_PARALLEL = 8
 # udev has a queue to work through first, and whatever runs next - mkfs,
 # cryptsetup - then fails with a bare "does not exist".
 _DEVICE_WAIT_S = 30
+# udevadm settle blocks on udev's queue instead of polling it, so the common
+# case costs one settle; the sleep only paces retries after a settle that
+# emptied the queue without producing the node.
+_SETTLE_S = 5
+_POLL_S = 0.2
 
 
 def parse_job_filesystem(job_name: str) -> str:
@@ -113,30 +118,37 @@ def wait_for_block_devices(
     paths: list[str],
     timeout_s: int = _DEVICE_WAIT_S,
 ) -> None:
-    """Block until every path is a block device, or fail naming the missing ones.
+    """Block until every path is a block device in the guest.
 
-    Waits in the guest rather than here: one round trip covers the whole
-    wait, and udevadm settle blocks on udev's queue instead of polling it.
+    Raises:
+        RuntimeError: if any path is still missing after timeout_s.
     """
-    quoted = " ".join(shlex.quote(path) for path in paths)
-    script = f"""
-set -u
-deadline=$(($(date +%s) + {timeout_s}))
-while :; do
-    missing=''
-    for p in {quoted}; do
-        [ -b "$p" ] || missing="$missing $p"
-    done
-    [ -z "$missing" ] && exit 0
-    [ "$(date +%s)" -ge "$deadline" ] && break
-    udevadm settle --timeout=5 >/dev/null 2>&1 || true
-    sleep 0.2
-done
-echo "block devices missing after {timeout_s}s:$missing" >&2
-lsblk -o NAME,SIZE,TYPE >&2 || true
-exit 1
-"""
-    vm.ssh_cmd(["sh", "-c", script], check=True, bypass=True)
+
+    def missing_devices() -> list[str]:
+        return [
+            path
+            for path in paths
+            if vm.ssh_cmd(["test", "-b", path], check=False, bypass=True).returncode
+        ]
+
+    deadline = time.monotonic() + timeout_s
+    while True:
+        vm.ssh_cmd(
+            ["udevadm", "settle", f"--timeout={_SETTLE_S}"], check=False, bypass=True
+        )
+        missing = missing_devices()
+        if not missing:
+            return
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(_POLL_S)
+
+    # Separates the two failures that reach the caller as one: a kernel that
+    # never took the partition table lists no partition here, a udev that never
+    # published the symlink lists one.
+    lsblk = vm.ssh_cmd(["lsblk", "-o", "NAME,SIZE,TYPE"], check=False, bypass=True)
+    print(lsblk.stdout)
+    raise RuntimeError(f"block devices missing after {timeout_s}s: {' '.join(missing)}")
 
 
 def create_partition(
