@@ -20,6 +20,18 @@ _FILL_IV = "42c311bbb9f75add783b29c1374e6daf"
 # is needed to keep up with NVMe write speeds.
 _MAX_PARALLEL = 8
 
+# The partition nodes a caller derives from get_partition_name() are created
+# by udev after the kernel's partition rescan, so they are not there when
+# parted or partprobe returns. On a device whose namespace was just formatted
+# udev has a queue to work through first, and whatever runs next - mkfs,
+# cryptsetup - then fails with a bare "does not exist".
+_DEVICE_WAIT_S = 30
+# udevadm settle blocks on udev's queue instead of polling it, so the common
+# case costs one settle; the sleep only paces retries after a settle that
+# emptied the queue without producing the node.
+_SETTLE_S = 5
+_POLL_S = 0.2
+
 
 def parse_job_filesystem(job_name: str) -> str:
     for fs_type in ["ext4", "f2fs"]:
@@ -101,6 +113,44 @@ def get_partition_name(device: str, partition_num: int) -> str:
     return f"{device}{partition_num}"
 
 
+def wait_for_block_devices(
+    vm: QemuVm | HostRunner,
+    paths: list[str],
+    timeout_s: int = _DEVICE_WAIT_S,
+) -> None:
+    """Block until every path is a block device in the guest.
+
+    Raises:
+        RuntimeError: if any path is still missing after timeout_s.
+    """
+
+    def missing_devices() -> list[str]:
+        return [
+            path
+            for path in paths
+            if vm.ssh_cmd(["test", "-b", path], check=False, bypass=True).returncode
+        ]
+
+    deadline = time.monotonic() + timeout_s
+    while True:
+        vm.ssh_cmd(
+            ["udevadm", "settle", f"--timeout={_SETTLE_S}"], check=False, bypass=True
+        )
+        missing = missing_devices()
+        if not missing:
+            return
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(_POLL_S)
+
+    # Separates the two failures that reach the caller as one: a kernel that
+    # never took the partition table lists no partition here, a udev that never
+    # published the symlink lists one.
+    lsblk = vm.ssh_cmd(["lsblk", "-o", "NAME,SIZE,TYPE"], check=False, bypass=True)
+    print(lsblk.stdout)
+    raise RuntimeError(f"block devices missing after {timeout_s}s: {' '.join(missing)}")
+
+
 def create_partition(
     vm: QemuVm | HostRunner, device: str, partitions: list[tuple[str, str]]
 ) -> None:
@@ -109,8 +159,13 @@ def create_partition(
         parted_cmd.extend(["mkpart", "primary", start, end])
 
     vm.ssh_cmd(parted_cmd, check=True, bypass=True)
+    # Advisory: the kernel also rescans when parted closes the device, and
+    # partprobe reports another device's failure as its own. The wait below
+    # is what gates the caller.
     vm.ssh_cmd(["partprobe", device], check=False, bypass=True)
-    time.sleep(0.5)
+    wait_for_block_devices(
+        vm, [get_partition_name(device, n) for n in range(1, len(partitions) + 1)]
+    )
 
 
 def format_luks_device_with_mode(
