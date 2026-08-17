@@ -94,7 +94,7 @@ def nvme_secure_erase(
         block_size: Optional LBA block size to set (512, 4096).
                     If specified, also changes the LBA format during the erase.
     """
-    cmd = ["nvme", "format", dev_path, "-s", "1"]
+    cmd = ["nvme", "format", dev_path, "-s", "1", "--force"]
 
     if block_size is not None:
         lbaf = get_lbaf_index(vm, dev_path, block_size)
