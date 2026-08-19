@@ -1,0 +1,221 @@
+Subject: [PATCH] kvm: fix page state change notification when a conversion
+ range spans multiple RAMBlocks
+
+kvm_convert_memory() looks up the MemoryRegion covering the start of a
+KVM_EXIT_MEMORY_FAULT-driven conversion request via memory_region_find(),
+which correctly clips the returned MemoryRegionSection to the boundary of
+that single MemoryRegion. The subsequent call to
+ram_block_attributes_state_change() however reuses the original, un-clipped
+`size` argument instead of the clipped section size. When the requested
+[start, start+size) range spans two separate RAMBlocks -- e.g. when a
+confidential (SEV-SNP/TDX) guest is configured with one
+memory-backend-memfd object per NUMA node via multiple
+"-numa node,memdev=..." entries -- the second RAMBlock's portion of the
+range gets attributed to the first RAMBlock's RamBlockAttributes, which
+rejects it with:
+
+  qemu-system-x86_64: ram_block_attributes_state_change, invalid range:
+    offset 0x27fe00000, size 0x400000
+  qemu-system-x86_64: Failed to notify the listener the state change of
+    (0x2ffe00000 + 0x400000) to private
+
+The same un-clipped size is also handed to kvm_set_memory_attributes_*()
+and to the ram_block_discard_*() calls, so the discard range can run past
+the end of the RAMBlock as well.
+
+This is reproducible with a guest topology such as:
+
+  -object memory-backend-memfd,id=numa_ram0,size=10G,share=true, \
+      prealloc=on,host-nodes=0,policy=bind
+  -object memory-backend-memfd,id=numa_ram1,size=10G,share=true, \
+      prealloc=on,host-nodes=1,policy=bind
+  -numa node,nodeid=0,cpus=0-1,memdev=numa_ram0
+  -numa node,nodeid=1,cpus=2-3,memdev=numa_ram1
+
+whenever the guest issues a page-state-change / memory-acceptance request
+that straddles the boundary between numa_ram0 and numa_ram1 (e.g. near the
+10GiB mark in the reproducer above).
+
+Fix this by moving the per-section work into a new helper,
+kvm_convert_memory_section(), and looping over the requested range in
+kvm_convert_memory(): each iteration converts exactly the part of the range
+that falls into the MemoryRegion/RAMBlock returned by memory_region_find(),
+advancing until the whole range is covered. Behaviour for a range contained
+in a single MemoryRegion -- including the "unassigned region converted to
+shared" and "non guest_memfd backed region" special cases -- is unchanged.
+
+---
+--- a/accel/kvm/kvm-all.c
++++ b/accel/kvm/kvm-all.c
+@@ -3327,43 +3327,15 @@
+     } while (sigismember(&chkset, SIG_IPI));
+ }
+ 
+-int kvm_convert_memory(hwaddr start, hwaddr size, bool to_private)
++static int kvm_convert_memory_section(MemoryRegionSection *section,
++                                      hwaddr start, hwaddr size,
++                                      bool to_private)
+ {
+-    MemoryRegionSection section;
++    MemoryRegion *mr = section->mr;
+     ram_addr_t offset;
+-    MemoryRegion *mr;
+     RAMBlock *rb;
+     void *addr;
+-    int ret = -EINVAL;
+-
+-    trace_kvm_convert_memory(start, size, to_private ? "shared_to_private" : "private_to_shared");
+-
+-    if (!QEMU_PTR_IS_ALIGNED(start, qemu_real_host_page_size()) ||
+-        !QEMU_PTR_IS_ALIGNED(size, qemu_real_host_page_size())) {
+-        return ret;
+-    }
+-
+-    if (!size) {
+-        return ret;
+-    }
+-
+-    section = memory_region_find(get_system_memory(), start, size);
+-    mr = section.mr;
+-    if (!mr) {
+-        /*
+-         * Ignore converting non-assigned region to shared.
+-         *
+-         * TDX requires vMMIO region to be shared to inject #VE to guest.
+-         * OVMF issues conservatively MapGPA(shared) on 32bit PCI MMIO region,
+-         * and vIO-APIC 0xFEC00000 4K page.
+-         * OVMF assigns 32bit PCI MMIO region to
+-         * [top of low memory: typically 2GB=0xC000000,  0xFC00000)
+-         */
+-        if (!to_private) {
+-            return 0;
+-        }
+-        return ret;
+-    }
++    int ret;
+ 
+     if (!memory_region_has_guest_memfd(mr)) {
+         /*
+@@ -3376,13 +3348,12 @@
+             !memory_region_is_ram_device(mr) &&
+             !memory_region_is_rom(mr) &&
+             !memory_region_is_romd(mr)) {
+-            ret = 0;
+-        } else {
+-            error_report("Convert non guest_memfd backed memory region "
+-                        "(0x%"HWADDR_PRIx" ,+ 0x%"HWADDR_PRIx") to %s",
+-                        start, size, to_private ? "private" : "shared");
++            return 0;
+         }
+-        goto out_unref;
++        error_report("Convert non guest_memfd backed memory region "
++                     "(0x%"HWADDR_PRIx" ,+ 0x%"HWADDR_PRIx") to %s",
++                     start, size, to_private ? "private" : "shared");
++        return -EINVAL;
+     }
+ 
+     if (to_private) {
+@@ -3391,10 +3362,10 @@
+         ret = kvm_set_memory_attributes_shared(start, size);
+     }
+     if (ret) {
+-        goto out_unref;
++        return ret;
+     }
+ 
+-    addr = memory_region_get_ram_ptr(mr) + section.offset_within_region;
++    addr = memory_region_get_ram_ptr(mr) + section->offset_within_region;
+     rb = qemu_ram_block_from_host(addr, false, &offset);
+ 
+     ret = ram_block_attributes_state_change(rb->attributes,
+@@ -3403,7 +3374,7 @@
+         error_report("Failed to notify the listener the state change of "
+                      "(0x%"HWADDR_PRIx" + 0x%"HWADDR_PRIx") to %s",
+                      start, size, to_private ? "private" : "shared");
+-        goto out_unref;
++        return ret;
+     }
+ 
+     if (to_private) {
+@@ -3412,18 +3383,78 @@
+              * shared memory is backed by hugetlb, which is supposed to be
+              * pre-allocated and doesn't need to be discarded
+              */
+-            goto out_unref;
++            return 0;
+         }
+         ret = ram_block_discard_shared_range(rb, offset, size);
+     } else {
+         ret = ram_block_discard_guest_memfd_range(rb, offset, size);
+     }
+ 
+-out_unref:
+-    memory_region_unref(mr);
+     return ret;
+ }
+ 
++int kvm_convert_memory(hwaddr start, hwaddr size, bool to_private)
++{
++    hwaddr done = 0;
++    int ret = -EINVAL;
++
++    trace_kvm_convert_memory(start, size, to_private ? "shared_to_private" : "private_to_shared");
++
++    if (!QEMU_PTR_IS_ALIGNED(start, qemu_real_host_page_size()) ||
++        !QEMU_PTR_IS_ALIGNED(size, qemu_real_host_page_size())) {
++        return ret;
++    }
++
++    if (!size) {
++        return ret;
++    }
++
++    /*
++     * A conversion request can span several MemoryRegions, e.g. when a
++     * confidential guest is backed by one memory-backend-memfd per NUMA node.
++     * memory_region_find() clips its result to a single MemoryRegion and
++     * ram_block_attributes_state_change() only accepts offsets within the
++     * RAMBlock it belongs to, so walk the range one section at a time instead
++     * of attributing the whole request to the region found at @start.
++     */
++    while (done < size) {
++        MemoryRegionSection section;
++        hwaddr chunk;
++
++        section = memory_region_find(get_system_memory(), start + done,
++                                     size - done);
++        if (!section.mr) {
++            /*
++             * Ignore converting non-assigned region to shared.
++             *
++             * TDX requires vMMIO region to be shared to inject #VE to guest.
++             * OVMF issues conservatively MapGPA(shared) on 32bit PCI MMIO region,
++             * and vIO-APIC 0xFEC00000 4K page.
++             * OVMF assigns 32bit PCI MMIO region to
++             * [top of low memory: typically 2GB=0xC000000,  0xFC00000)
++             */
++            return to_private ? -EINVAL : 0;
++        }
++
++        chunk = int128_get64(section.size);
++        if (!chunk) {
++            memory_region_unref(section.mr);
++            return -EINVAL;
++        }
++
++        ret = kvm_convert_memory_section(&section, start + done, chunk,
++                                         to_private);
++        memory_region_unref(section.mr);
++        if (ret) {
++            return ret;
++        }
++
++        done += chunk;
++    }
++
++    return 0;
++}
++
+ int kvm_cpu_exec(CPUState *cpu)
+ {
+     struct kvm_run *run = cpu->kvm_run;
