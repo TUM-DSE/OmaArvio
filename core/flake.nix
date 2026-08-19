@@ -40,7 +40,7 @@
 
       packages.${system} = {
         qemu-amd = pkgs-2505.callPackage ./nix/qemu-amd.nix { pkgs = pkgs-2505; };
-        qemu-upstream = pkgs-latest.qemu_full;
+        qemu-upstream = pkgs-latest.callPackage ./nix/qemu-upstream.nix { pkgs = pkgs-latest; };
         ovmf-amd-sev-snp = pkgs.callPackage ./nix/ovmf-amd-sev-snp.nix { pkgs = pkgs-2505; };
         ovmf-upstream = pkgs-latest.OVMF.fd;
       };
