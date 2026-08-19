@@ -4,13 +4,15 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixpkgs-2505.url = "github:NixOS/nixpkgs/nixos-25.05";
+    # More up-to-date unstable
+    nixpkgs-latest-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     disko = {
       url = "github:nix-community/disko";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-2505, disko }:
+  outputs = { self, nixpkgs, nixpkgs-2505, nixpkgs-latest-unstable, disko }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -19,6 +21,10 @@
         overlays = [ self.overlays.qemu-qmp ];
       };
       pkgs-2505 = import nixpkgs-2505 {
+        inherit system;
+        config.allowUnfree = true;
+      };
+      pkgs-latest = import nixpkgs-latest-unstable {
         inherit system;
         config.allowUnfree = true;
       };
@@ -34,9 +40,9 @@
 
       packages.${system} = {
         qemu-amd = pkgs-2505.callPackage ./nix/qemu-amd.nix { pkgs = pkgs-2505; };
-        qemu-upstream = pkgs.qemu_full;
+        qemu-upstream = pkgs-latest.qemu_full;
         ovmf-amd-sev-snp = pkgs.callPackage ./nix/ovmf-amd-sev-snp.nix { pkgs = pkgs-2505; };
-        ovmf-upstream = pkgs.OVMF.fd;
+        ovmf-upstream = pkgs-latest.OVMF.fd;
       };
 
       # NixOS module: base guest config (networking, SSH, /share, basic tools)
