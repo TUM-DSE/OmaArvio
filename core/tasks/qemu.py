@@ -785,20 +785,82 @@ def spawn_qemu(
             print("qemu stopped")
 
 
-def setup_hugepages(vm: Runner, total_size_gb: int = 4, page_size_gb: int = 1) -> None:
-    """Setup hugepages inside the VM or on the host.
+def numa_node_count(vm: Runner) -> int:
+    """NUMA nodes the runner's kernel exposes, or 1 when it has none.
+
+    Read from the runner rather than from its resource entry, because both
+    kinds answer it: a QemuVm has as many guest cells as its `numa_node` list,
+    and a HostRunner reserves on the host, whose nodes are its own. A kernel
+    built without NUMA has no `/sys/devices/system/node` at all, which is the
+    single-node answer.
+    """
+    result = vm.ssh_cmd(
+        ["sh", "-c", "ls -d /sys/devices/system/node/node[0-9]* 2>/dev/null | wc -l"],
+        check=False,
+        verbose=False,
+        bypass=True,
+    )
+    try:
+        return max(1, int((result.stdout or "").strip()))
+    except (AttributeError, ValueError):
+        print("WARNING: cannot read the NUMA node count; assuming one node")
+        return 1
+
+
+def hugepage_split(
+    total_size_gb: int, page_size_gb: int, nodes: int
+) -> tuple[int, int]:
+    """(per-node GB, total GB actually reserved) for a total across `nodes`.
+
+    Rounded **up** to a whole page per node: the caller's figure is what its
+    application has to find, so overshooting it by less than a page per node
+    is the harmless direction and reserving under it is an -ENOMEM inside the
+    run. A total of 0 clears the reservation and stays 0.
+    """
+    if total_size_gb <= 0:
+        return 0, 0
+    pages = -(-total_size_gb // (nodes * page_size_gb))
+    per_node = pages * page_size_gb
+    return per_node, per_node * nodes
+
+
+def setup_hugepages(
+    vm: Runner,
+    total_size_gb: int = 4,
+    page_size_gb: int = 1,
+    nodes: Optional[int] = None,
+) -> None:
+    """Reserve `total_size_gb` of huge pages across the runner's NUMA nodes.
+
+    The total is a total, which is what the name says and what a caller sizing
+    a reservation against the machine's memory means. `dpdk-hugepages.py
+    --setup` does not take one: it writes its argument to the `nr_hugepages` of
+    *every* per-node directory it finds, so the amount it reserves is the
+    argument times the node count. On a two-node machine a 32G setup therefore
+    asks the kernel for 64G, and on anything with 64G of memory it fails
+    outright -- reserving nothing, after the boot, with the error naming only
+    the pages it did not get. The division happens here instead, and each node
+    gets an equal share.
 
     Args:
         vm: QemuVm or HostRunner instance
         total_size_gb: Total size of hugepages in GB (default: 4G)
         page_size_gb: Size of each hugepage in GB (default: 1G)
+        nodes: NUMA nodes to spread the total over; None asks the runner
     """
+    if nodes is None:
+        nodes = numa_node_count(vm)
+    per_node_gb, reserved_gb = hugepage_split(total_size_gb, page_size_gb, nodes)
+
     cmd = [
         "dpdk-hugepages.py",
         "--setup",
-        f"{total_size_gb}G",
+        f"{per_node_gb}G",
         "--pagesize",
         f"{page_size_gb}G",
     ]
-    print(f"Setting up {total_size_gb}G hugepages")
+    print(
+        f"Setting up {reserved_gb}G hugepages: {per_node_gb}G on each of "
+        f"{nodes} NUMA node{'s' if nodes != 1 else ''}"
+    )
     vm.ssh_cmd(cmd, check=True, bypass=True)
