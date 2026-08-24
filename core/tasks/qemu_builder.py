@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Iterator, List, Optional, Tuple, Dict, Any
 
 from core.tasks.config import PROJECT_ROOT, BUILD_DIR, LINUX_DIR
-from core.tasks.resources import VMResource
+from core.tasks.resources import VMResource, vcpu_pin_map
 from core.tasks.utils.utils import parse_size_to_bytes
 from core.tasks.utils.pci import short_bdf
 from core.tasks.utils.vfio import (
@@ -294,11 +294,21 @@ class GuestNumaFeature(QemuFeature):
     ):
         if not resource.numa_node:
             raise ValueError("GuestNumaFeature requires at least one NUMA node")
+        if resource.cpu % len(resource.numa_node) != 0:
+            raise ValueError(
+                f"Cannot split {resource.cpu} vCPUs evenly over "
+                f"{len(resource.numa_node)} NUMA node(s) {resource.numa_node}: "
+                f"pick a CPU count that is a multiple of {len(resource.numa_node)}"
+            )
         self.resource = resource
         self.prealloc = prealloc
         self.hugepages = hugepages
 
     def setup(self, builder: QemuVmBuilder) -> None:
+        # Fail a VM whose vCPUs do not fit the host nodes its memory is bound to
+        # before QEMU starts, rather than at pin time with the VM already up.
+        vcpu_pin_map(self.resource, getattr(self.resource, "pin_base", 0) or 0)
+
         if not self.hugepages:
             return
         n = len(self.resource.numa_node)

@@ -21,9 +21,26 @@ from typing import Any, Dict, Iterator, List, Text, Optional, Union
 
 from core.tasks.procs import ChildFd, pprint_cmd, run, system_run, get_nix_env
 from core.tasks.config import PROJECT_ROOT
+from core.tasks.resources import host_nodes_spare_cpus, vcpu_pin_map
 
 
 from qemu.qmp.legacy import QEMUMonitorProtocol
+
+
+def _fmt_cpus(cpus: Any) -> str:
+    """Render CPU ids as compact ranges, the way sysfs cpulists read."""
+    ids = list(cpus)
+    if not ids:
+        return "none"
+    parts = []
+    start = prev = ids[0]
+    for cpu in ids[1:] + [None]:
+        if cpu == prev + 1:
+            prev = cpu
+            continue
+        parts.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = cpu
+    return ",".join(parts)
 
 
 class QmpSession:
@@ -342,6 +359,12 @@ class QemuVm(Runner):
     def pin_vcpu(self, pcpu_base: int = 0) -> None:
         """Pin vCPUs to physical CPUs.
 
+        When the VM has a NUMA resource, the targets come from
+        :func:`vcpu_pin_map`, i.e. the CPUs of the very host nodes the guest
+        cells' memory is bound to; ``pcpu_base`` is then an offset into each
+        node's cpulist rather than a raw host CPU number. Without one, the
+        legacy ``pcpu_base + cpu-index`` mapping is used.
+
         Records the set of physical CPUs the VM is pinned to (vCPU threads plus
         iothreads) in ``self.pinned_cpus`` so monitoring can scope CPU
         utilization to exactly the cores this run uses.
@@ -349,11 +372,30 @@ class QemuVm(Runner):
         cpu_info = self.send("query-cpus-fast")["return"]
         num_cpus = len(cpu_info)
         self.pinned_cpus: List[int] = []
+
+        resource = self.config.get("resource")
+        numa_node = list(getattr(resource, "numa_node", None) or [])
+        pin_map: Optional[List[int]] = None
+        if numa_node:
+            pin_map = vcpu_pin_map(resource, pcpu_base, num_vcpus=num_cpus)
+            per_cell = num_cpus // len(numa_node)
+            for cell, host_node in enumerate(numa_node):
+                first = cell * per_cell
+                cell_cpus = pin_map[first : first + per_cell]
+                print(
+                    f"pin: cell {cell} (host node {host_node}) "
+                    f"vcpus {_fmt_cpus(range(first, first + per_cell))} "
+                    f"-> cpus {_fmt_cpus(cell_cpus)}"
+                )
+
         for cpu in cpu_info:
             tid = cpu["thread-id"]
             cpuidx = cpu["cpu-index"]
             try:
-                target = cpuidx + pcpu_base
+                if pin_map is not None:
+                    target = pin_map[cpuidx]
+                else:
+                    target = cpuidx + pcpu_base
                 cmd = ["taskset", "-pc", str(target), str(tid)]
                 run(cmd)
                 self.pinned_cpus.append(target)
@@ -367,16 +409,33 @@ class QemuVm(Runner):
             print("No iothreads found")
             return
         print("Pin iothreads")
-        for i, cpu in enumerate(iothreads_info):
-            tid = cpu["thread-id"]
-            try:
+        # Only CPUs of the bound nodes are eligible; running out of them leaves
+        # the remaining iothreads to numactl --cpunodebind rather than pinning
+        # them onto a foreign node.
+        spare = (
+            host_nodes_spare_cpus(numa_node, set(pin_map))
+            if pin_map is not None
+            else None
+        )
+        for i, iothread in enumerate(iothreads_info):
+            tid = iothread["thread-id"]
+            if spare is not None:
+                if i >= len(spare):
+                    print(
+                        f"No spare CPU on host node(s) {numa_node} for iothread "
+                        f"{i}: leaving it and the remaining "
+                        f"{num_iothreads - i - 1} confined to the node(s)"
+                    )
+                    break
+                target = spare[i]
+            else:
                 target = pcpu_base + num_cpus + i
+            try:
                 cmd = ["taskset", "-pc", str(target), str(tid)]
                 run(cmd)
                 self.pinned_cpus.append(target)
             except subprocess.CalledProcessError as e:
-                # FIXME: this can happen if pcpu_base + num_cpus + i is bigger than the number of available CPUs
-                print("Failed to pin vCPU{}: {}".format(cpuidx, e))
+                print("Failed to pin iothread{}: {}".format(i, e))
                 return
 
     def shutdown(self, timeout: int = 10) -> None:
