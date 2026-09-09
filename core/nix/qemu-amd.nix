@@ -34,7 +34,7 @@ with pkgs;
     owner = "AMDESE";
     repo = "qemu";
     rev = "cc6594b0ae3327af2a107ff6925ef002dcf228ac";
-    hash = "sha256-VHhcoKjhkJQTyMu7b5/EN8IJyyK1TaDvXnVIW++TwPs=";
+    hash = "sha256-htPSYwXFwPf78oio2M5N4OOx0OhJTlcOg5DUFomk++w=";
     fetchSubmodules = false;
     leaveDotGit = true;
     postFetch = ''
