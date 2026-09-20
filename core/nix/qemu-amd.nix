@@ -29,6 +29,10 @@ with pkgs;
   enableDocs = false;
   enableTools = false;
 }).overrideAttrs (new: old: {
+  patches = (old.patches or [ ]) ++ [
+    ./patches/qemu/kvm-exit-snp-req-certs.patch
+  ];
+
   # Use AMDESE QEMU with snp-certs-rfc3-wip1 branch for certs-path
   src = pkgs.fetchFromGitHub {
     owner = "AMDESE";
