@@ -40,3 +40,8 @@ See [docs/module-authoring.md](docs/module-authoring.md) for a full walkthrough 
 
 For the benchmark action lifecycle and result layout rules, see
 [docs/actions.md](docs/actions.md).
+
+## License
+
+OmaArvio is licensed under the [Apache License 2.0](LICENSE). Patches stay under
+their upstream project license.
